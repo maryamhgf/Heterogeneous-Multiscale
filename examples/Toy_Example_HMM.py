@@ -29,12 +29,11 @@ if args.adjoint:
 else:
     from torchdiffeq import odeint
 
+
 device = torch.device('cuda:' + str(args.gpu) if torch.cuda.is_available() else 'cpu')
 
-true_y0_fast = torch.tensor([0.]).to(device)
-true_y0_slow = torch.tensor([0.]).to(device)
 
-t = torch.linspace(0., 35., args.data_size).to(device)
+t = torch.linspace(0., 0.1, args.data_size).to(device)
 
 freq_slow = 1
 freq_fast = 4
@@ -51,6 +50,26 @@ class Lambda_fast(nn.Module):
 lambda_slow = Lambda_slow()
 lambda_fast = Lambda_fast()
 
+
+def generate_stellar_orbits(a=2, b=3, epslion=0.01):
+    data = []
+    t_prev = t[0]
+    A = torch.tensor([[0., a, 0., 0.], [-a, 0., 0., 0.], [0., 0., 0., b], [0., 0., -b, 0.]])
+    y_0 = torch.tensor([[1., 0., 1., 0]])
+    y = y_0
+    for t_sample in t:
+        dt = t_sample - t_prev
+        f = torch.tensor([[0., y[0][1]**2/a, 0., (2*y[0][0]*y[0][1])/b]])
+        y = y + dt * ((1/epslion) * A@y.T + f.T).T
+        t_prev = t_sample
+        data.append(y)
+    return data
+
+def extract_modes(data, index_slow, index_fast):
+    slow = [item[0][index_slow] for item in data]
+    fast = [item[0][index_fast] for item in data]
+    return torch.tensor(slow), torch.tensor(fast)
+    
 def generate_time_series(true_y0_fast, true_y0_slow):
     data_slow = []
     data_fast = []
@@ -71,7 +90,11 @@ def generate_time_series(true_y0_fast, true_y0_slow):
         data_fast.append(y_fast)
     return torch.tensor(data_slow), torch.tensor(data_fast)
 
-slow, fast = generate_time_series(true_y0_fast, true_y0_slow)
+true_y_0 = [torch.tensor([[1., 0., 1., 0]])]
+true_y0_slow, true_y0_fast = extract_modes(true_y_0, 0, 3)
+#slow, fast = generate_time_series(true_y0_fast, true_y0_slow)
+data = generate_stellar_orbits()
+slow, fast = extract_modes(data, 0, 3)
 
 def convert_to_int(lst):
     output = []

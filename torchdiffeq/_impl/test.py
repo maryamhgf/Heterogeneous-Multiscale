@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import matplotlib.pyplot as plt
 
 a = torch.tensor([[1, 0, 4]])
 b = torch.tensor([[2, 4, 8]])
@@ -78,7 +79,7 @@ print(ts[s])
 
 print(ts.reshape(102, 1))
 
-
+'''
 class ODEFunc_slow(nn.Module):
 
     def __init__(self, dim_in=1, dim_out=1):
@@ -102,3 +103,60 @@ class ODEFunc_slow(nn.Module):
 f = ODEFunc_slow()
 print(type(f))
 f.forward(torch.tensor([1]), torch.tensor([2]), torch.tensor([3]))
+'''
+a = 2.
+b = 3.
+
+A = torch.tensor([[0., a, 0., 0.], [-a, 0., 0., 0.], [0., 0., 0., b], [0., 0., -1*b, 0.]])
+
+print(A.T)
+print(A)
+
+t = torch.linspace(0., 0.1, 100)
+
+def generate_stellar_orbits(a=2, b=3, epslion=0.01):
+    data = []
+    t_prev = t[0]
+    A = torch.tensor([[0., a, 0., 0.], [-a, 0., 0., 0.], [0., 0., 0., b], [0., 0., -b, 0.]])
+    y_0 = torch.tensor([[1., 0., 1., 0]])
+    y = y_0
+    for t_sample in t:
+        dt = t_sample - t_prev
+        print(dt)
+        f = torch.tensor([[0., y[0][1]**2/a, 0., (2*y[0][0]*y[0][1])/b]])
+        y = y + dt * ((1/epslion) * A@y.T + f.T).T
+        t_prev = t_sample
+        data.append(y)
+    return data
+def convert_to_int(lst):
+    output = []
+    for element in lst:
+        output.append(int(element))
+    return output
+
+def plot_data(fast, slow, t):
+    slow_int = convert_to_int(slow)
+    fast_int = convert_to_int(fast)
+    plt.plot(t, slow_int, label="slow")
+    plt.plot(t, fast_int, label="fast")
+    plt.legend(loc="upper left")
+    plt.show()
+    
+    
+
+data = generate_stellar_orbits()
+print(data[0].shape)
+slow = [item[0][0] for item in data]
+fast = [item[0][3] for item in data]
+
+plot_data(fast, slow, t)
+
+def extract_modes(data, index_slow, index_fast):
+    slow = [item[0][index_slow] for item in data]
+    fast = [item[0][index_fast] for item in data]
+    return slow, fast
+
+true_y_0 = [torch.tensor([[1., 0., 1., 0]])]
+
+true_y0_slow, true_y0_fast = extract_modes(true_y_0, 0, 3)
+print(true_y0_slow, true_y0_fast)
