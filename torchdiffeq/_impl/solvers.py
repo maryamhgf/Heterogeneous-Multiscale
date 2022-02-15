@@ -1,4 +1,5 @@
 import abc
+from time import time
 import torch
 from .event_handling import find_event
 from .misc import _handle_unused_kwargs
@@ -48,7 +49,7 @@ class AdaptiveStepsizeEventODESolver(AdaptiveStepsizeODESolver, metaclass=abc.AB
 class FixedGridODESolver(metaclass=abc.ABCMeta):
     order: int
 
-    def __init__(self, func, y0, step_size=None, grid_constructor=None, interp="linear", perturb=False, **unused_kwargs):
+    def __init__(self, func, y0, step_size=None, grid_constructor=None, interp="linear", perturb=False, func_fast=None, y0_fast=None, dt_fast=None, **unused_kwargs):
         self.atol = unused_kwargs.pop('atol')
         unused_kwargs.pop('rtol', None)
         unused_kwargs.pop('norm', None)
@@ -56,13 +57,16 @@ class FixedGridODESolver(metaclass=abc.ABCMeta):
         del unused_kwargs
 
         self.func = func
+        self.func_fast = func_fast
         self.y0 = y0
+        self.y0_fast = y0_fast
         self.dtype = y0.dtype
         self.device = y0.device
+        self.device = y0.device
         self.step_size = step_size
+        self.step_size_fast = dt_fast
         self.interp = interp
         self.perturb = perturb
-
         if step_size is None:
             if grid_constructor is None:
                 self.grid_constructor = lambda f, y0, t: t
@@ -94,7 +98,6 @@ class FixedGridODESolver(metaclass=abc.ABCMeta):
     def integrate(self, t):
         time_grid = self.grid_constructor(self.func, self.y0, t)
         assert time_grid[0] == t[0] and time_grid[-1] == t[-1]
-
         solution = torch.empty(len(t), *self.y0.shape, dtype=self.y0.dtype, device=self.y0.device)
         solution[0] = self.y0
 
@@ -102,7 +105,9 @@ class FixedGridODESolver(metaclass=abc.ABCMeta):
         y0 = self.y0
         for t0, t1 in zip(time_grid[:-1], time_grid[1:]):
             dt = t1 - t0
-            dy, f0 = self._step_func(self.func, t0, dt, t1, y0)
+            dy, f0, solution_fast = self._step_func(self.func, t0, dt, t1, y0, 
+                func_fast=self.func_fast, dt_fast=self.step_size_fast, y0_fast=self.y0_fast)
+            dy = dy.reshape(len(dy))
             y1 = y0 + dy
 
             while j < len(t) and t1 >= t[j]:
@@ -116,7 +121,7 @@ class FixedGridODESolver(metaclass=abc.ABCMeta):
                 j += 1
             y0 = y1
 
-        return solution
+        return solution, solution_fast
 
     def integrate_until_event(self, t0, event_fn):
         assert self.step_size is not None, "Event handling for fixed step solvers currently requires `step_size` to be provided in options."

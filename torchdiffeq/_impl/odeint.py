@@ -4,7 +4,7 @@ from .dopri5 import Dopri5Solver
 from .bosh3 import Bosh3Solver
 from .adaptive_heun import AdaptiveHeunSolver
 from .fehlberg2 import Fehlberg2
-from .fixed_grid import Euler, Midpoint, RK4
+from .fixed_grid import Euler, Midpoint, RK4, HMM
 from .fixed_adams import AdamsBashforth, AdamsBashforthMoulton
 from .dopri8 import Dopri8Solver
 from .scipy_wrapper import ScipyWrapperODESolver
@@ -25,25 +25,24 @@ SOLVERS = {
     'fixed_adams': AdamsBashforthMoulton,
     # ~Backwards compatibility
     'scipy_solver': ScipyWrapperODESolver,
+    'HMM': HMM
 }
 
 
-def odeint(func, y0, t, *, rtol=1e-7, atol=1e-9, method=None, options=None, event_fn=None):
+def odeint(func, y0, t, *, rtol=1e-7, atol=1e-9, method=None, options=None, event_fn=None, func_fast=None, y0_fast=None, dt_fast=None):
     """Integrate a system of ordinary differential equations.
 
     Solves the initial value problem for a non-stiff system of first order ODEs:
         ```
         dy/dt = func(t, y), y(t[0]) = y0
+        for the fast var: dy_fast/dt = func_fast(t, y), y(t[0]) = y0_fast
         ```
     where y is a Tensor or tuple of Tensors of any shape.
 
     Output dtypes and numerical precision are based on the dtypes of the inputs `y0`.
 
     Args:
-        func: Function that maps a scalar Tensor `t` and a Tensor holding the state `y`
-            into a Tensor of state derivatives with respect to time. Optionally, `y`
-            can also be a tuple of Tensors.
-        y0: N-D Tensor giving starting value of `y` at time point `t[0]`. Optionally, `y0`
+        func: Function that maps a scalar Tensor `t` and a Tensor holddy/dt = func(t, y), y(t[0]) = y0]`. Optionally, `y0`
             can also be a tuple of Tensors.
         t: 1-D Tensor holding a sequence of time points for which to solve for
             `y`, in either increasing or decreasing order. The first element of
@@ -68,13 +67,12 @@ def odeint(func, y0, t, *, rtol=1e-7, atol=1e-9, method=None, options=None, even
     Raises:
         ValueError: if an invalid `method` is provided.
     """
-
+    func_slow = func
     shapes, func, y0, t, rtol, atol, method, options, event_fn, t_is_reversed = _check_inputs(func, y0, t, rtol, atol, method, options, event_fn, SOLVERS)
 
-    solver = SOLVERS[method](func=func, y0=y0, rtol=rtol, atol=atol, **options)
-
+    solver = SOLVERS['HMM'](func=func_slow, y0=y0, rtol=rtol, atol=atol, func_fast=func_fast, y0_fast=y0_fast, dt_fast=dt_fast, **options)
     if event_fn is None:
-        solution = solver.integrate(t)
+        solution, solution_fast = solver.integrate(t)
     else:
         event_t, solution = solver.integrate_until_event(t[0], event_fn)
         event_t = event_t.to(t)
@@ -85,9 +83,9 @@ def odeint(func, y0, t, *, rtol=1e-7, atol=1e-9, method=None, options=None, even
         solution = _flat_to_shape(solution, (len(t),), shapes)
 
     if event_fn is None:
-        return solution
+        return solution, solution_fast
     else:
-        return event_t, solution
+        return event_t, solution, solution_fast
 
 
 def odeint_event(func, y0, t0, *, event_fn, reverse_time=False, odeint_interface=odeint, **kwargs):
