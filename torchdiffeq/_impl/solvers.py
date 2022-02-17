@@ -95,18 +95,22 @@ class FixedGridODESolver(metaclass=abc.ABCMeta):
     def _step_func(self, func, t0, dt, t1, y0):
         pass
 
-    def integrate(self, t):
+    def integrate(self, t, t_fast):
         time_grid = self.grid_constructor(self.func, self.y0, t)
         assert time_grid[0] == t[0] and time_grid[-1] == t[-1]
         solution = torch.empty(len(t), *self.y0.shape, dtype=self.y0.dtype, device=self.y0.device)
+        solutions_fast = torch.empty(len(t), *self.y0_fast.shape, dtype=self.y0.dtype, device=self.y0.device)
         solution[0] = self.y0
-
+        solutions_fast[0] = self.y0_fast[0]
         j = 1
         y0 = self.y0
+        smaple_num = 0
         for t0, t1 in zip(time_grid[:-1], time_grid[1:]):
+            _t_fast_interval = t_fast[smaple_num]
             dt = t1 - t0
             dy, f0, solution_fast = self._step_func(self.func, t0, dt, t1, y0, 
-                func_fast=self.func_fast, dt_fast=self.step_size_fast, y0_fast=self.y0_fast)
+                func_fast=self.func_fast, dt_fast=self.step_size_fast, 
+                y0_fast=self.y0_fast, t_fast_interval=_t_fast_interval, batch_time=len(t))
             dy = dy.reshape(len(dy))
             y1 = y0 + dy
 
@@ -120,8 +124,9 @@ class FixedGridODESolver(metaclass=abc.ABCMeta):
                     raise ValueError(f"Unknown interpolation method {self.interp}")
                 j += 1
             y0 = y1
-
-        return solution, solution_fast
+            solutions_fast[smaple_num] = solution_fast.T
+            smaple_num += 1
+        return solution, solutions_fast
 
     def integrate_until_event(self, t0, event_fn):
         assert self.step_size is not None, "Event handling for fixed step solvers currently requires `step_size` to be provided in options."

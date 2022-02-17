@@ -16,6 +16,7 @@ parser = argparse.ArgumentParser('ODE demo')
 parser.add_argument('--method', type=str, choices=['dopri5', 'adams'], default='dopri5')
 parser.add_argument('--data_size', type=int, default=1000)
 parser.add_argument('--batch_time', type=int, default=10)
+parser.add_argument('--fast_batch_time', type=int, default=10)
 parser.add_argument('--batch_size', type=int, default=20)
 parser.add_argument('--niters', type=int, default=2000)
 parser.add_argument('--test_freq', type=int, default=20)
@@ -33,8 +34,6 @@ else:
 device = torch.device('cuda:' + str(args.gpu) if torch.cuda.is_available() else 'cpu')
 
 
-t = torch.linspace(0., 0.1, args.data_size).to(device)
-
 freq_slow = 1
 freq_fast = 4
 
@@ -51,74 +50,75 @@ lambda_slow = Lambda_slow()
 lambda_fast = Lambda_fast()
 
 
-def generate_stellar_orbits(a=2, b=3, epslion=0.01):
+def generate_stellar_orbits(a=2, b=3, epslion=0.01, fast_dataset_size=5):
+    ts = torch.linspace(0., 0.1, args.data_size).to(device)
     data = []
-    t_prev = t[0]
+    t_prev = ts[0]
     A = torch.tensor([[0., a, 0., 0.], [-a, 0., 0., 0.], [0., 0., 0., b], [0., 0., -b, 0.]])
     y_0 = torch.tensor([[1., 0., 1., 0]])
     y = y_0
-    for t_sample in t:
-        dt = t_sample - t_prev
+    for t in ts:
+        dt = t - t_prev
         f = torch.tensor([[0., y[0][1]**2/a, 0., (2*y[0][0]*y[0][1])/b]])
         y = y + dt * ((1/epslion) * A@y.T + f.T).T
-        t_prev = t_sample
+        t_prev = t
         data.append(y)
-    return data
+    return data, ts
 
 def extract_modes(data, index_slow, index_fast):
     slow = [item[0][index_slow] for item in data]
     fast = [item[0][index_fast] for item in data]
-    return torch.tensor(slow), torch.tensor(fast)
-    
-def generate_time_series(true_y0_fast, true_y0_slow):
-    data_slow = []
-    data_fast = []
-    t_prev = t[0]
-    y_slow = true_y0_slow
-    y_fast = true_y0_fast
-    
-    for t_sample in t:
-        dt = t_sample - t_prev
-        y_slow_prev = y_slow
-        y_fast_prev = y_fast
-        y_slow = y_slow + dt * lambda_slow.forward(t_sample, y_slow_prev, y_fast_prev)
-        y_fast = y_fast + dt * lambda_fast.forward(t_sample, y_fast_prev, y_slow_prev)
+    return slow, fast
 
-        t_prev = t_sample
+def time_series_sampling(slow, fast, data_t, slow_step_size=None, fast_step_size=None, fast_size=4):
+    dt = data_t[1] - data_t[0]
+    if(slow_step_size == None):
+        slow_step_size = dt * 3
+    if(fast_step_size == None):
+        fast_step_size = dt
+    slow_step = int(slow_step_size/dt)
+    fast_step = int(fast_step_size/dt)
+    if(slow_step == 0):
+        slow_step = 1
+    if(fast_step == 0):
+        fast_step = 1
+    t_slow = [data_t[i * slow_step] for i in range(int(len(data_t)/slow_step))]
+    t_fast = [[data_t[data_t.index(sample_t) + i*fast_step] for i in range(min(fast_size, int(len(data_t) - data_t.index(sample_t)/fast_step)))] for sample_t in t_slow]
+    data_slow = [slow[i * slow_step] for i in range(int(len(slow)/slow_step))]
+    data_fast = [[fast[data_t.index(sample_t) + i*fast_step] for i in range(min(fast_size, int(len(fast) - data_t.index(sample_t)/fast_step)))] for sample_t in t_slow]
+    return t_slow, t_fast, torch.tensor(data_slow), torch.tensor(data_fast)
 
-        data_slow.append(y_slow)
-        data_fast.append(y_fast)
-    return torch.tensor(data_slow), torch.tensor(data_fast)
+def convert_to_float(lst):
+    output = []
+    for element in lst:
+        output.append(float(element))
+    return output
 
 true_y_0 = [torch.tensor([[1., 0., 1., 0]])]
 true_y0_slow, true_y0_fast = extract_modes(true_y_0, 0, 3)
-#slow, fast = generate_time_series(true_y0_fast, true_y0_slow)
-data = generate_stellar_orbits()
-slow, fast = extract_modes(data, 0, 3)
-
-def convert_to_int(lst):
-    output = []
-    for element in lst:
-        output.append(int(element))
-    return output
+print("begining")
+data, ts = generate_stellar_orbits()
+data_slow, data_fast = extract_modes(data, 0, 3)
+t_slow, t_fast, slow, fast = time_series_sampling(data_slow, data_fast, convert_to_float(ts))
 
 def plot_data(fast, slow):
-    slow_int = convert_to_int(slow)
-    fast_int = convert_to_int(fast)
+    slow_int = convert_to_float(slow)
+    fast_int = convert_to_float(fast)
     plt.plot(slow_int, label="slow")
     plt.plot(fast_int, label="fast")
     plt.legend(loc="upper left")
     plt.show()
 
 #plot_data(fast, slow)
-def get_batch(true_y_slow, true_y_fast):
-    s = torch.from_numpy(np.random.choice(np.arange(args.data_size - args.batch_time, dtype=np.int64), args.batch_size, replace=False))
+def get_batch(true_y_slow, true_y_fast, ts, ts_fast):
+    s = torch.from_numpy(np.random.choice(np.arange(len(ts) - args.batch_time, dtype=np.int64), args.batch_size, replace=False))
     batch_y0_slow = true_y_slow[s]  # (M, D)
     batch_y0_fast = true_y_fast[s]  # (M, D)
-    batch_t = t[:args.batch_time]  # (T)
+    batch_t = ts[:args.batch_time]  # (T)
+    batch_t_fast = ts_fast[:args.batch_time]
     batch_y_slow = torch.stack([true_y_slow[s + i] for i in range(args.batch_time)], dim=0)  # (T, M, D)
-    batch_y_fast = torch.stack([true_y_fast[s + i] for i in range(args.batch_time)], dim=0)  # (T, M, D)
-    return batch_y0_slow.to(device), batch_t.to(device), batch_y_slow.to(device), batch_y0_fast.to(device), batch_y_fast.to(device)
+    batch_y_fast = torch.stack([true_y_fast[s + i] for i in range(args.fast_batch_time)], dim=0)  # (T, M, D)
+    return batch_y0_slow.to(device), batch_y_slow.to(device), batch_y0_fast.to(device), batch_y_fast.to(device), torch.tensor(batch_t).to(device), torch.tensor(batch_t_fast).to(device)
 
 def makedirs(dirname):
     if not os.path.exists(dirname):
@@ -143,9 +143,9 @@ def visualize(true_y, pred_y, odefunc, itr):
         ax_traj.set_title('Trajectories')
         ax_traj.set_xlabel('t')
         ax_traj.set_ylabel('x,y')
-        ax_traj.plot(t.cpu().numpy(), true_y.cpu().numpy()[:, 0, 0], t.cpu().numpy(), true_y.cpu().numpy()[:, 0, 1], 'g-')
-        ax_traj.plot(t.cpu().numpy(), pred_y.cpu().numpy()[:, 0, 0], '--', t.cpu().numpy(), pred_y.cpu().numpy()[:, 0, 1], 'b--')
-        ax_traj.set_xlim(t.cpu().min(), t.cpu().max())
+        ax_traj.plot(ts.cpu().numpy(), true_y.cpu().numpy()[:, 0, 0], ts.cpu().numpy(), true_y.cpu().numpy()[:, 0, 1], 'g-')
+        ax_traj.plot(ts.cpu().numpy(), pred_y.cpu().numpy()[:, 0, 0], '--', ts.cpu().numpy(), pred_y.cpu().numpy()[:, 0, 1], 'b--')
+        ax_traj.set_xlim(ts.cpu().min(), ts.cpu().max())
         ax_traj.set_ylim(-2, 2)
         ax_traj.legend()
 
@@ -196,7 +196,11 @@ class ODEFunc_fast(nn.Module):
                 nn.init.constant_(m.bias, val=0)
 
     def forward(self, t, y, y_other_dim):
-        return self.net(y.reshape(len(y), 1)**3)
+        if(y.shape == torch.Size([])):
+            dim0 = 1
+        else:
+            dim0 = len(y)
+        return self.net(y.reshape(dim0, 1)**3)
 
 #f_theta (slow ODE)
 class ODEFunc_slow(nn.Module):
@@ -257,16 +261,16 @@ if __name__ == '__main__':
     
 
     for itr in range(1, args.niters + 1):
+        print("----")
         optimizer.zero_grad()
         optimizer_fast.zero_grad()
-        batch_y0_slow, batch_t, batch_y_slow, batch_y0_fast, batch_y_fast = get_batch(slow, fast)
-        
-        pred_y, pred_y_fast = odeint(func, batch_y0_slow, batch_t, func_fast=func_fast, y0_fast=batch_y0_fast, dt_fast=_dt_fast)
-        
+        batch_y0_slow, batch_y_slow, batch_y0_fast, batch_y_fast, batch_t, batch_t_fast = get_batch(slow, fast, t_slow, t_fast)
+        pred_y, pred_y_fast = odeint(func, batch_y0_slow, batch_t, batch_t_fast, func_fast=func_fast, y0_fast=batch_y0_fast, dt_fast=_dt_fast)
+
         loss = torch.mean(torch.abs(pred_y - batch_y_slow))
-        loss_fast = torch.mean(torch.abs(pred_y_fast - batch_y_fast[0:2]))
 
-
+        loss_fast = torch.mean(torch.abs(pred_y_fast - batch_y_fast))
+        
         loss.backward(retain_graph=True)
         loss_fast.backward(retain_graph=True)
         
@@ -276,15 +280,20 @@ if __name__ == '__main__':
         time_meter.update(time.time() - end)
         loss_meter.update(loss.item())
         loss_meter_fast.update(loss_fast.item())
-
+        print(loss, loss_fast)
+        '''
         if itr % args.test_freq == 0:
+            print("----------------------------------------")
             with torch.no_grad():
-                pred_y, pred_y_fast = odeint(func, true_y0_slow, t, func_fast=func_fast, y0_fast=true_y0_fast, dt_fast=_dt_fast)
+                print("types: ", len(true_y0_fast))
+                print("types: ", torch.tensor(true_y0_fast).shape)
+                pred_y, pred_y_fast = odeint(func, torch.tensor(true_y0_slow), torch.tensor(t_slow), torch.tensor(t_fast), func_fast=func_fast, y0_fast=torch.tensor(true_y0_fast), dt_fast=_dt_fast)
                 loss = torch.mean(torch.abs(pred_y - slow))
                 loss_fast = torch.mean(torch.abs(pred_y_fast - fast))
                 print('[slow] Iter {:04d} | Total Loss {:.6f}'.format(itr, loss.item()))
                 print('[fast] Iter {:04d} | Total Loss {:.6f}'.format(itr, loss_fast.item()))
                 visualize(slow, pred_y, func, ii)
                 ii += 1
-
+        '''
         end = time.time()
+        
