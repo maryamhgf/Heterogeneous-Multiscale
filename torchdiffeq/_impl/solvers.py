@@ -49,7 +49,8 @@ class AdaptiveStepsizeEventODESolver(AdaptiveStepsizeODESolver, metaclass=abc.AB
 class FixedGridODESolver(metaclass=abc.ABCMeta):
     order: int
 
-    def __init__(self, func, y0, step_size=None, grid_constructor=None, interp="linear", perturb=False, func_fast=None, y0_fast=None, dt_fast=None, **unused_kwargs):
+    def __init__(self, func, y0, step_size=None, grid_constructor=None, interp="linear", perturb=False, func_fast=None, 
+                    y0_fast=None, dt_fast=None, sampling_rate=3, kernel='gaussian', **unused_kwargs):
         self.atol = unused_kwargs.pop('atol')
         unused_kwargs.pop('rtol', None)
         unused_kwargs.pop('norm', None)
@@ -67,6 +68,10 @@ class FixedGridODESolver(metaclass=abc.ABCMeta):
         self.step_size_fast = dt_fast
         self.interp = interp
         self.perturb = perturb
+        self.nfe_fast = 0
+        self.nfe_slow = 0
+        self.sampling_rate = sampling_rate
+        self.kernel = kernel
         if step_size is None:
             if grid_constructor is None:
                 self.grid_constructor = lambda f, y0, t: t
@@ -106,7 +111,7 @@ class FixedGridODESolver(metaclass=abc.ABCMeta):
         for t0, t1 in zip(time_grid[:-1], time_grid[1:]):
             dt = t1 - t0
             dy, f0, solution_fast = self._step_func(self.func, t0, dt, t1, y0, 
-                func_fast=self.func_fast, dt_fast=self.step_size_fast, y0_fast=self.y0_fast)
+                func_fast=self.func_fast, dt_fast=self.step_size_fast, y0_fast=self.y0_fast, sampling_rate=self.sampling_rate, kernel=self.kernel)
             dy = dy.reshape(len(dy))
             y1 = y0 + dy
 
