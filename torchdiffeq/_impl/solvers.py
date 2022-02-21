@@ -3,6 +3,7 @@ from time import time
 import torch
 from .event_handling import find_event
 from .misc import _handle_unused_kwargs
+import time
 
 
 class AdaptiveStepsizeODESolver(metaclass=abc.ABCMeta):
@@ -96,6 +97,7 @@ class FixedGridODESolver(metaclass=abc.ABCMeta):
         pass
 
     def integrate(self, t, t_fast):
+        start = time.time()
         time_grid = self.grid_constructor(self.func, self.y0, t)
         assert time_grid[0] == t[0] and time_grid[-1] == t[-1]
         solution = torch.empty(len(t), *self.y0.shape, dtype=self.y0.dtype, device=self.y0.device)
@@ -105,12 +107,14 @@ class FixedGridODESolver(metaclass=abc.ABCMeta):
         j = 1
         y0 = self.y0
         smaple_num = 0
+        fast_timings = []
         for t0, t1 in zip(time_grid[:-1], time_grid[1:]):
             _t_fast_interval = t_fast[smaple_num]
             dt = t1 - t0
-            dy, f0, solution_fast = self._step_func(self.func, t0, dt, t1, y0, 
+            dy, f0, solution_fast, timing = self._step_func(self.func, t0, dt, t1, y0, 
                 func_fast=self.func_fast, dt_fast=self.step_size_fast, 
                 y0_fast=self.y0_fast, t_fast_interval=_t_fast_interval, batch_time=len(t))
+            fast_timings.append(timing)
             dy = dy.reshape(len(dy))
             y1 = y0 + dy
 
@@ -126,7 +130,8 @@ class FixedGridODESolver(metaclass=abc.ABCMeta):
             y0 = y1
             solutions_fast[smaple_num] = solution_fast.T
             smaple_num += 1
-        return solution, solutions_fast
+        timing = time.time() - start
+        return solution, solutions_fast, timing, sum(fast_timings)/len(fast_timings)
 
     def integrate_until_event(self, t0, event_fn):
         assert self.step_size is not None, "Event handling for fixed step solvers currently requires `step_size` to be provided in options."

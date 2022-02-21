@@ -72,7 +72,7 @@ def odeint(func, y0, t, t_fast, *, rtol=1e-7, atol=1e-9, method=None, options=No
 
     solver = SOLVERS['HMM'](func=func_slow, y0=y0, rtol=rtol, atol=atol, func_fast=func_fast, y0_fast=y0_fast, dt_fast=dt_fast, **options)
     if event_fn is None:
-        solution, solution_fast = solver.integrate(t, t_fast)
+        solution, solution_fast, timing, fast_timing = solver.integrate(t, t_fast)
     else:
         event_t, solution = solver.integrate_until_event(t[0], event_fn)
         event_t = event_t.to(t)
@@ -83,7 +83,7 @@ def odeint(func, y0, t, t_fast, *, rtol=1e-7, atol=1e-9, method=None, options=No
         solution = _flat_to_shape(solution, (len(t),), shapes)
 
     if event_fn is None:
-        return solution, solution_fast
+        return solution, solution_fast, timing, fast_timing
     else:
         return event_t, solution, solution_fast
 

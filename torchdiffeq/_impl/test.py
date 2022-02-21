@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import matplotlib.pyplot as plt
-
+'''
 a = torch.tensor([[1, 0, 4]])
 b = torch.tensor([[2, 4, 8]])
 
@@ -80,6 +80,7 @@ print(ts[s])
 print(ts.reshape(102, 1))
 
 '''
+'''
 class ODEFunc_slow(nn.Module):
 
     def __init__(self, dim_in=1, dim_out=1):
@@ -103,6 +104,7 @@ class ODEFunc_slow(nn.Module):
 f = ODEFunc_slow()
 print(type(f))
 f.forward(torch.tensor([1]), torch.tensor([2]), torch.tensor([3]))
+'''
 '''
 a = 2.
 b = 3.
@@ -237,9 +239,8 @@ time_grid = t_fast[0]
 
 for t0_sample, t1_sample in zip(time_grid[:-1], time_grid[1:]):
 
-a = torch.randn(6, 4)
-print(torch.sum(a, 0))
-
+#a = torch.randn(6, 4)
+#print(torch.sum(a, 0))
 
 a = torch.tensor([0])
 b = torch.tensor(0)
@@ -248,3 +249,12 @@ print(b.shape)
 
 true_y_0 = [torch.tensor([[1., 0., 1., 0]])]
 true_y0_slow, true_y0_fast = extract_modes(true_y_0, 0, 3)
+
+
+'''
+mmm = torch.rand(4,4)
+b = mmm[:, :1]
+
+print(mmm)
+print(b)
+print(b.reshape([len(b)]))

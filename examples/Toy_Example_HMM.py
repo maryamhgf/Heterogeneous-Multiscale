@@ -10,11 +10,39 @@ import torch.nn as nn
 import torch.optim as optim
 import matplotlib.pyplot as plt
 
+import os
+import psutil
+import tracemalloc
+
+# inner psutil function
+def process_memory():
+    process = psutil.Process(os.getpid())
+    mem_info = process.memory_info()
+    return mem_info.rss
+ 
+# decorator function
+def profile(func):
+    def wrapper(*args, **kwargs):
+ 
+        mem_before = process_memory()
+        result = func(*args, **kwargs)
+        mem_after = process_memory()
+        print("{}:consumed memory: {:,}".format(
+            func.__name__,
+            mem_before, mem_after, mem_after - mem_before))
+ 
+        return result
+    return wrapper
+ 
+# instantiation of decorator function
+
+
+
 torch.pi = torch.acos(torch.zeros(1)).item() * 2
 
 parser = argparse.ArgumentParser('ODE demo')
 parser.add_argument('--method', type=str, choices=['dopri5', 'adams'], default='dopri5')
-parser.add_argument('--data_size', type=int, default=1000)
+parser.add_argument('--data_size', type=int, default=10000)
 parser.add_argument('--batch_time', type=int, default=10)
 parser.add_argument('--fast_batch_time', type=int, default=10)
 parser.add_argument('--batch_size', type=int, default=20)
@@ -50,7 +78,7 @@ lambda_slow = Lambda_slow()
 lambda_fast = Lambda_fast()
 
 
-def generate_stellar_orbits(a=2, b=3, epslion=0.01, fast_dataset_size=5):
+def generate_stellar_orbits(a=2, b=3, epslion=0.009, fast_dataset_size=5):
     ts = torch.linspace(0., 0.1, args.data_size).to(device)
     data = []
     t_prev = ts[0]
@@ -86,9 +114,13 @@ def time_series_sampling(slow, fast, data_t, slow_step_size=None, fast_step_size
     t_fast = [[data_t[data_t.index(sample_t) + i*fast_step] for i in range(min(fast_size, int(len(data_t) - data_t.index(sample_t)/fast_step)))] for sample_t in t_slow]
     data_slow = [slow[i * slow_step] for i in range(int(len(slow)/slow_step))]
     data_fast = [[fast[data_t.index(sample_t) + i*fast_step] for i in range(min(fast_size, int(len(fast) - data_t.index(sample_t)/fast_step)))] for sample_t in t_slow]
+    print(len(t_slow))
+    print(len(data_fast), len(data_fast[0]), data[0][0])
+    print(torch.tensor(data_fast))
     return t_slow, t_fast, torch.tensor(data_slow), torch.tensor(data_fast)
 
 def convert_to_float(lst):
+    print(lst.shape)
     output = []
     for element in lst:
         output.append(float(element))
@@ -100,16 +132,29 @@ print("begining")
 data, ts = generate_stellar_orbits()
 data_slow, data_fast = extract_modes(data, 0, 3)
 t_slow, t_fast, slow, fast = time_series_sampling(data_slow, data_fast, convert_to_float(ts))
+print("here")
 
-def plot_data(fast, slow):
+def plot_data(fast, slow, title=None, xlabel=None, ylabel=None):
+    print("inside print")
     slow_int = convert_to_float(slow)
+    if(len(fast.shape) == 2):
+        fast_one_dim = fast[:, :1]
+        fast_one_dim.reshape([len(fast)])
+    fast = fast_one_dim
     fast_int = convert_to_float(fast)
     plt.plot(slow_int, label="slow")
     plt.plot(fast_int, label="fast")
     plt.legend(loc="upper left")
+    if(title != None):
+        plt.title(title)
+    if(xlabel != None):
+        plt.xlabel(xlabel)
+    if(ylabel != None):
+        plt.ylabel(ylabel)
+    plt.savefig("loss_midpoint.png")
     plt.show()
 
-#plot_data(fast, slow)
+plot_data(fast, slow)
 def get_batch(true_y_slow, true_y_fast, ts, ts_fast):
     s = torch.from_numpy(np.random.choice(np.arange(len(ts) - args.batch_time, dtype=np.int64), args.batch_size, replace=False))
     batch_y0_slow = true_y_slow[s]  # (M, D)
@@ -135,53 +180,10 @@ if args.viz:
     plt.show(block=False)
 
 
-def visualize(true_y, pred_y, odefunc, itr):
-
-    if args.viz:
-
-        ax_traj.cla()
-        ax_traj.set_title('Trajectories')
-        ax_traj.set_xlabel('t')
-        ax_traj.set_ylabel('x,y')
-        ax_traj.plot(ts.cpu().numpy(), true_y.cpu().numpy()[:, 0, 0], ts.cpu().numpy(), true_y.cpu().numpy()[:, 0, 1], 'g-')
-        ax_traj.plot(ts.cpu().numpy(), pred_y.cpu().numpy()[:, 0, 0], '--', ts.cpu().numpy(), pred_y.cpu().numpy()[:, 0, 1], 'b--')
-        ax_traj.set_xlim(ts.cpu().min(), ts.cpu().max())
-        ax_traj.set_ylim(-2, 2)
-        ax_traj.legend()
-
-        ax_phase.cla()
-        ax_phase.set_title('Phase Portrait')
-        ax_phase.set_xlabel('x')
-        ax_phase.set_ylabel('y')
-        ax_phase.plot(true_y.cpu().numpy()[:, 0, 0], true_y.cpu().numpy()[:, 0, 1], 'g-')
-        ax_phase.plot(pred_y.cpu().numpy()[:, 0, 0], pred_y.cpu().numpy()[:, 0, 1], 'b--')
-        ax_phase.set_xlim(-2, 2)
-        ax_phase.set_ylim(-2, 2)
-
-        ax_vecfield.cla()
-        ax_vecfield.set_title('Learned Vector Field')
-        ax_vecfield.set_xlabel('x')
-        ax_vecfield.set_ylabel('y')
-
-        y, x = np.mgrid[-2:2:21j, -2:2:21j]
-        dydt = odefunc(0, torch.Tensor(np.stack([x, y], -1).reshape(21 * 21, 2)).to(device)).cpu().detach().numpy()
-        mag = np.sqrt(dydt[:, 0]**2 + dydt[:, 1]**2).reshape(-1, 1)
-        dydt = (dydt / mag)
-        dydt = dydt.reshape(21, 21, 2)
-
-        ax_vecfield.streamplot(x, y, dydt[:, :, 0], dydt[:, :, 1], color="black")
-        ax_vecfield.set_xlim(-2, 2)
-        ax_vecfield.set_ylim(-2, 2)
-
-        fig.tight_layout()
-        plt.savefig('png/{:03d}'.format(itr))
-        plt.draw()
-        plt.pause(0.001)
-
 #f_theta (slow ODE)
 class ODEFunc_fast(nn.Module):
 
-    def __init__(self, dim_in=1, dim_out=1):
+    def __init__(self, dim_in=2, dim_out=1):
         super(ODEFunc_fast, self).__init__()
 
         self.net = nn.Sequential(
@@ -200,12 +202,16 @@ class ODEFunc_fast(nn.Module):
             dim0 = 1
         else:
             dim0 = len(y)
-        return self.net(y.reshape(dim0, 1)**3)
+        y = y.reshape([dim0, 1])
+        y_other_dim = y_other_dim.reshape([len(y_other_dim), 1])
+
+        input = torch.concat([y, y_other_dim], 1)
+        return self.net(torch.sin(input))
 
 #f_theta (slow ODE)
 class ODEFunc_slow(nn.Module):
 
-    def __init__(self, dim_in=1, dim_out=1):
+    def __init__(self, dim_in=2, dim_out=1):
         super(ODEFunc_slow, self).__init__()
 
         self.net = nn.Sequential(
@@ -219,8 +225,11 @@ class ODEFunc_slow(nn.Module):
                 nn.init.normal_(m.weight, mean=0, std=0.1)
                 nn.init.constant_(m.bias, val=0)
 
-    def forward(self, t, y, y_oter_dim):
-        return self.net(y.reshape(len(y), 1)**3)
+    def forward(self, t, y, y_other_dim):
+        y = y.reshape([len(y), 1])
+        y_other_dim = y_other_dim.reshape([len(y_other_dim), 1])
+        input = torch.concat([y, y_other_dim], 1)
+        return self.net(torch.sin(input))
        
 
 class RunningAverageMeter(object):
@@ -258,17 +267,27 @@ if __name__ == '__main__':
     
     loss_meter = RunningAverageMeter(0.97)
     loss_meter_fast = RunningAverageMeter(0.97)
-    
+    losses_fast = []
+    losses_slow = []
+    times = []
+    slow_intg_time = []
+    fast_intg_time = []
 
     for itr in range(1, args.niters + 1):
         print("----")
+        start = time.time()
         optimizer.zero_grad()
         optimizer_fast.zero_grad()
         batch_y0_slow, batch_y_slow, batch_y0_fast, batch_y_fast, batch_t, batch_t_fast = get_batch(slow, fast, t_slow, t_fast)
-        pred_y, pred_y_fast = odeint(func, batch_y0_slow, batch_t, batch_t_fast, func_fast=func_fast, y0_fast=batch_y0_fast, dt_fast=_dt_fast)
-
+        tracemalloc.start()
+        
+        pred_y, pred_y_fast, timing, fast_timing = odeint(func, batch_y0_slow, batch_t, batch_t_fast, func_fast=func_fast, y0_fast=batch_y0_fast, dt_fast=_dt_fast)
+        current, peak = tracemalloc.get_traced_memory()
+        print(f"Current memory usage is {current / 10**6}MB; Peak was {peak / 10**6}MB")
+        tracemalloc.stop()
+        slow_intg_time.append(timing)
+        fast_intg_time.append(fast_timing)
         loss = torch.mean(torch.abs(pred_y - batch_y_slow))
-
         loss_fast = torch.mean(torch.abs(pred_y_fast - batch_y_fast))
         
         loss.backward(retain_graph=True)
@@ -280,7 +299,17 @@ if __name__ == '__main__':
         time_meter.update(time.time() - end)
         loss_meter.update(loss.item())
         loss_meter_fast.update(loss_fast.item())
-        print(loss, loss_fast)
+        print(float(loss), float(loss_fast))
+        if(float(loss_fast) >= 2):
+            print("outlier")
+            if(len(losses_fast) == 0):
+                losses_fast.append(0)
+            else:
+                losses_fast.append(losses_fast[len(losses_fast) - 1])
+        else:
+            losses_fast.append(float(loss_fast))
+        losses_slow.append(float(loss))
+        
         '''
         if itr % args.test_freq == 0:
             print("----------------------------------------")
@@ -295,5 +324,13 @@ if __name__ == '__main__':
                 visualize(slow, pred_y, func, ii)
                 ii += 1
         '''
+        times.append(time.time() - end)
         end = time.time()
         
+        print("time_meter: ", time_meter)
+
+        
+plot_data(losses_fast, losses_slow, xlabel="loss", ylabel="iterations")
+print("timing avg: ", sum(times)/len(times))
+print("slow intg abg time: ", sum(slow_intg_time)/len(slow_intg_time))
+print("fast intg abg time: ", sum(fast_intg_time)/len(fast_intg_time))
