@@ -128,6 +128,7 @@ class FixedGridODESolver(metaclass=abc.ABCMeta):
                     raise ValueError(f"Unknown interpolation method {self.interp}")
                 j += 1
             y0 = y1
+
             solutions_fast[smaple_num] = solution_fast.T
             smaple_num += 1
         timing = time.time() - start

@@ -48,6 +48,7 @@ parser.add_argument('--fast_batch_time', type=int, default=10)
 parser.add_argument('--batch_size', type=int, default=20)
 parser.add_argument('--niters', type=int, default=2000)
 parser.add_argument('--test_freq', type=int, default=20)
+parser.add_argument('--fast_step', type=int, default=4)
 parser.add_argument('--viz', action='store_true')
 parser.add_argument('--gpu', type=int, default=0)
 parser.add_argument('--adjoint', action='store_true')
@@ -128,14 +129,12 @@ def convert_to_float(lst):
 
 true_y_0 = [torch.tensor([[1., 0., 1., 0]])]
 true_y0_slow, true_y0_fast = extract_modes(true_y_0, 0, 3)
-print("begining")
 data, ts = generate_stellar_orbits()
 data_slow, data_fast = extract_modes(data, 0, 3)
 t_slow, t_fast, slow, fast = time_series_sampling(data_slow, data_fast, convert_to_float(ts))
-print("here")
 
 def plot_data(fast, slow, title=None, xlabel=None, ylabel=None):
-    print("inside print")
+    plt.figure()
     slow_int = convert_to_float(slow)
     if(len(fast.shape) == 2):
         fast_one_dim = fast[:, :1]
@@ -154,7 +153,7 @@ def plot_data(fast, slow, title=None, xlabel=None, ylabel=None):
     plt.savefig("loss_midpoint.png")
     plt.show()
 
-plot_data(fast, slow)
+#plot_data(fast, slow)
 def get_batch(true_y_slow, true_y_fast, ts, ts_fast):
     s = torch.from_numpy(np.random.choice(np.arange(len(ts) - args.batch_time, dtype=np.int64), args.batch_size, replace=False))
     batch_y0_slow = true_y_slow[s]  # (M, D)
@@ -299,7 +298,7 @@ if __name__ == '__main__':
         time_meter.update(time.time() - end)
         loss_meter.update(loss.item())
         loss_meter_fast.update(loss_fast.item())
-        print(float(loss), float(loss_fast))
+        print("loss (slow): ", float(loss), "loss (fast): ", float(loss_fast))
         if(float(loss_fast) >= 2):
             print("outlier")
             if(len(losses_fast) == 0):
@@ -310,24 +309,32 @@ if __name__ == '__main__':
             losses_fast.append(float(loss_fast))
         losses_slow.append(float(loss))
         
-        '''
+        
         if itr % args.test_freq == 0:
             print("----------------------------------------")
             with torch.no_grad():
-                print("types: ", len(true_y0_fast))
-                print("types: ", torch.tensor(true_y0_fast).shape)
-                pred_y, pred_y_fast = odeint(func, torch.tensor(true_y0_slow), torch.tensor(t_slow), torch.tensor(t_fast), func_fast=func_fast, y0_fast=torch.tensor(true_y0_fast), dt_fast=_dt_fast)
+                if torch.tensor(t_slow).ndimension() != 1:
+                    print(torch.tensor(t_slow).shape)
+                if(len(true_y0_fast) == 1):
+                    true_y0_fast_lst = args.fast_step * [true_y0_fast]
+                    true_y0_fast = true_y0_fast_lst
+                pred_y, pred_y_fast, timing, fast_timing = odeint(func, torch.tensor([true_y0_slow]), torch.tensor(t_slow), torch.tensor(t_fast), func_fast=func_fast, y0_fast=torch.tensor(true_y0_fast).T, dt_fast=_dt_fast)
+                if itr % (args.niters/4) == 0:
+                    plt.figure()
+                    plt.plot(pred_y.reshape(len(pred_y), 1), label = "predicted")
+                    plt.plot(slow, label = "true value")
+                    plt.legend("upper right")
+                    plt.savefig("prediction" + str(itr))
+
                 loss = torch.mean(torch.abs(pred_y - slow))
                 loss_fast = torch.mean(torch.abs(pred_y_fast - fast))
                 print('[slow] Iter {:04d} | Total Loss {:.6f}'.format(itr, loss.item()))
                 print('[fast] Iter {:04d} | Total Loss {:.6f}'.format(itr, loss_fast.item()))
-                visualize(slow, pred_y, func, ii)
                 ii += 1
-        '''
+        
         times.append(time.time() - end)
         end = time.time()
         
-        print("time_meter: ", time_meter)
 
         
 plot_data(losses_fast, losses_slow, xlabel="loss", ylabel="iterations")

@@ -68,6 +68,8 @@ def odeint(func, y0, t, t_fast, *, rtol=1e-7, atol=1e-9, method=None, options=No
         ValueError: if an invalid `method` is provided.
     """
     func_slow = func
+    if t.ndimension() != 1:
+        t = t.reshape(t.shape[1])
     shapes, func, y0, t, rtol, atol, method, options, event_fn, t_is_reversed = _check_inputs(func, y0, t, rtol, atol, method, options, event_fn, SOLVERS)
 
     solver = SOLVERS['HMM'](func=func_slow, y0=y0, rtol=rtol, atol=atol, func_fast=func_fast, y0_fast=y0_fast, dt_fast=dt_fast, **options)
