@@ -39,12 +39,12 @@ torch.pi = torch.acos(torch.zeros(1)).item() * 2
 parser = argparse.ArgumentParser('ODE demo')
 parser.add_argument('--method', type=str, choices=['dopri5', 'adams'], default='dopri5')
 parser.add_argument('--data_size', type=int, default=10000)
-parser.add_argument('--batch_time', type=int, default=10)
-parser.add_argument('--fast_batch_time', type=int, default=10)
-parser.add_argument('--batch_size', type=int, default=20)
+parser.add_argument('--batch_time', type=int, default=1000)
+parser.add_argument('--fast_batch_time', type=int, default=100)
+parser.add_argument('--batch_size', type=int, default=128)
 parser.add_argument('--niters', type=int, default=2000)
-parser.add_argument('--test_freq', type=int, default=20)
-parser.add_argument('--fast_step', type=int, default=5)
+parser.add_argument('--test_freq', type=int, default=100)
+parser.add_argument('--fast_step', type=int, default=15)
 parser.add_argument('--viz', action='store_true')
 parser.add_argument('--gpu', type=int, default=0)
 parser.add_argument('--adjoint', action='store_true')
@@ -57,22 +57,6 @@ else:
 
 
 device = torch.device('cuda:' + str(args.gpu) if torch.cuda.is_available() else 'cpu')
-
-
-freq_slow = 1
-freq_fast = 4
-
-class Lambda_slow(nn.Module):
-    def forward(self, t, y, y_fast):
-        return torch.sin(freq_slow * t) + 1/(y_fast + 0.01)
-
-
-class Lambda_fast(nn.Module):
-    def forward(self, t, y, y_slow):
-        return torch.sin(freq_fast * t)**2 + torch.cos(y_slow)**2
-
-lambda_slow = Lambda_slow()
-lambda_fast = Lambda_fast()
 
 
 def generate_stellar_orbits(a=2, b=3, epslion=0.009):
@@ -114,16 +98,9 @@ def time_series_sampling(slow, fast, data_t, slow_step_size=None, fast_step_size
     print(len(t_slow))
     for i in range(len(data_fast)):
         if(len(data_fast[i]) != fast_size):
-            print("here", len(data_fast[i]), fast_size, i)
             for j in range(fast_size - len(data_fast[i])):
                 data_fast[i].append(data_fast[i][-1])
                 t_fast[i].append(t_fast[i][-1])
-    print("here", len(data_fast[3332]))
-    print(data_fast[0][0])
-    print(len(data_fast), len(data_fast[0]))
-
-    print(torch.tensor(data_fast).shape)
-    print(torch.tensor(data_fast))
     return t_slow, t_fast, torch.tensor(data_slow), torch.tensor(data_fast)
 
 def convert_to_float(lst):
@@ -187,7 +164,7 @@ if args.viz:
 #f_theta (slow ODE)
 class ODEFunc_fast(nn.Module):
 
-    def __init__(self, dim_in=2, dim_out=1):
+    def __init__(self, dim_in=3, dim_out=1):
         super(ODEFunc_fast, self).__init__()
 
         self.net = nn.Sequential(
@@ -208,15 +185,14 @@ class ODEFunc_fast(nn.Module):
             dim0 = len(y)
         y = y.reshape([dim0, 1])
         y_other_dim = y_other_dim.reshape([len(y_other_dim), 1])
-
-        input = torch.concat([y, y_other_dim], 1)
+        input = torch.concat([y, y_other_dim, torch.full(y.shape, t)], 1)
         self.nfe += 1
         return self.net(torch.sin(input))
 
 #f_theta (slow ODE)
 class ODEFunc_slow(nn.Module):
 
-    def __init__(self, dim_in=2, dim_out=1):
+    def __init__(self, dim_in=3, dim_out=1):
         super(ODEFunc_slow, self).__init__()
 
         self.net = nn.Sequential(
@@ -233,7 +209,7 @@ class ODEFunc_slow(nn.Module):
     def forward(self, t, y, y_other_dim):
         y = y.reshape([len(y), 1])
         y_other_dim = y_other_dim.reshape([len(y_other_dim), 1])
-        input = torch.concat([y, y_other_dim], 1)
+        input = torch.concat([y, y_other_dim, torch.full(y.shape, t)], 1)
         self.nfe += 1
         return self.net(torch.sin(input))
        
@@ -264,8 +240,9 @@ if __name__ == '__main__':
     func = ODEFunc_slow().to(device)
     func_fast = ODEFunc_fast().to(device)
     
-    optimizer = optim.RMSprop(func.parameters(), lr=1e-3)
-    optimizer_fast = optim.RMSprop(func_fast.parameters(), lr=1e-3)
+    optimizer = optim.RMSprop(func.parameters(), lr=1e-1)
+    optimizer_fast = optim.RMSprop(func_fast.parameters(), lr=1e-1)
+    
     
     end = time.time()
 
@@ -297,6 +274,7 @@ if __name__ == '__main__':
         slow_intg_time.append(timing)
         fast_intg_time.append(fast_timing)
         loss = torch.mean(torch.abs(pred_y - batch_y_slow))
+        print("batch_y_fast.shape", batch_y_fast.shape)
         loss_fast = torch.mean(torch.abs(pred_y_fast - batch_y_fast))
         
         loss.backward(retain_graph=True)
