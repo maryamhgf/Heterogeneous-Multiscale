@@ -48,7 +48,7 @@ parser.add_argument('--fast_batch_time', type=int, default=10)
 parser.add_argument('--batch_size', type=int, default=20)
 parser.add_argument('--niters', type=int, default=2000)
 parser.add_argument('--test_freq', type=int, default=20)
-parser.add_argument('--fast_step', type=int, default=4)
+parser.add_argument('--fast_step', type=int, default=5)
 parser.add_argument('--viz', action='store_true')
 parser.add_argument('--gpu', type=int, default=0)
 parser.add_argument('--adjoint', action='store_true')
@@ -79,8 +79,8 @@ lambda_slow = Lambda_slow()
 lambda_fast = Lambda_fast()
 
 
-def generate_stellar_orbits(a=2, b=3, epslion=0.009, fast_dataset_size=5):
-    ts = torch.linspace(0., 0.01, args.data_size).to(device)
+def generate_stellar_orbits(a=2, b=3, epslion=0.009):
+    ts = torch.linspace(0., 0.1, args.data_size).to(device)
     data = []
     t_prev = ts[0]
     A = torch.tensor([[0., a, 0., 0.], [-a, 0., 0., 0.], [0., 0., 0., b], [0., 0., -b, 0.]])
@@ -99,7 +99,7 @@ def extract_modes(data, index_slow, index_fast):
     fast = [item[0][index_fast] for item in data]
     return slow, fast
 
-def time_series_sampling(slow, fast, data_t, slow_step_size=None, fast_step_size=None, fast_size=4):
+def time_series_sampling(slow, fast, data_t, slow_step_size=None, fast_step_size=None, fast_size=args.fast_step):
     dt = data_t[1] - data_t[0]
     if(slow_step_size == None):
         slow_step_size = dt * 3
@@ -116,7 +116,17 @@ def time_series_sampling(slow, fast, data_t, slow_step_size=None, fast_step_size
     data_slow = [slow[i * slow_step] for i in range(int(len(slow)/slow_step))]
     data_fast = [[fast[data_t.index(sample_t) + i*fast_step] for i in range(min(fast_size, int(len(fast) - data_t.index(sample_t)/fast_step)))] for sample_t in t_slow]
     print(len(t_slow))
-    print(len(data_fast), len(data_fast[0]), data[0][0])
+    for i in range(len(data_fast)):
+        if(len(data_fast[i]) != fast_size):
+            print("here", len(data_fast[i]), fast_size, i)
+            for j in range(fast_size - len(data_fast[i])):
+                data_fast[i].append(data_fast[i][-1])
+                t_fast[i].append(t_fast[i][-1])
+    print("here", len(data_fast[3332]))
+    print(data_fast[0][0])
+    print(len(data_fast), len(data_fast[0]))
+
+    print(torch.tensor(data_fast).shape)
     print(torch.tensor(data_fast))
     return t_slow, t_fast, torch.tensor(data_slow), torch.tensor(data_fast)
 
@@ -312,11 +322,10 @@ if __name__ == '__main__':
         if itr % args.test_freq == 0:
             print("----------------------------------------")
             with torch.no_grad():
-                if torch.tensor(t_slow).ndimension() != 1:
-                    print(torch.tensor(t_slow).shape)
                 if(len(true_y0_fast) == 1):
                     true_y0_fast_lst = args.fast_step * [true_y0_fast]
                     true_y0_fast = true_y0_fast_lst
+                print(torch.tensor(true_y0_fast).shape)
                 pred_y, pred_y_fast, timing, fast_timing = odeint(func, torch.tensor([true_y0_slow]), torch.tensor(t_slow), torch.tensor(t_fast), func_fast=func_fast, y0_fast=torch.tensor(true_y0_fast).T, dt_fast=_dt_fast)
                 if itr % (args.niters/4) == 0:
                     plt.figure()
