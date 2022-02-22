@@ -80,7 +80,7 @@ lambda_fast = Lambda_fast()
 
 
 def generate_stellar_orbits(a=2, b=3, epslion=0.009, fast_dataset_size=5):
-    ts = torch.linspace(0., 0.1, args.data_size).to(device)
+    ts = torch.linspace(0., 0.01, args.data_size).to(device)
     data = []
     t_prev = ts[0]
     A = torch.tensor([[0., a, 0., 0.], [-a, 0., 0., 0.], [0., 0., 0., b], [0., 0., -b, 0.]])
@@ -121,7 +121,6 @@ def time_series_sampling(slow, fast, data_t, slow_step_size=None, fast_step_size
     return t_slow, t_fast, torch.tensor(data_slow), torch.tensor(data_fast)
 
 def convert_to_float(lst):
-    print(lst.shape)
     output = []
     for element in lst:
         output.append(float(element))
@@ -139,7 +138,7 @@ def plot_data(fast, slow, title=None, xlabel=None, ylabel=None):
     if(len(fast.shape) == 2):
         fast_one_dim = fast[:, :1]
         fast_one_dim.reshape([len(fast)])
-    fast = fast_one_dim
+        fast = fast_one_dim
     fast_int = convert_to_float(fast)
     plt.plot(slow_int, label="slow")
     plt.plot(fast_int, label="fast")
@@ -153,7 +152,7 @@ def plot_data(fast, slow, title=None, xlabel=None, ylabel=None):
     plt.savefig("loss_midpoint.png")
     plt.show()
 
-#plot_data(fast, slow)
+plot_data(fast, slow)
 def get_batch(true_y_slow, true_y_fast, ts, ts_fast):
     s = torch.from_numpy(np.random.choice(np.arange(len(ts) - args.batch_time, dtype=np.int64), args.batch_size, replace=False))
     batch_y0_slow = true_y_slow[s]  # (M, D)
@@ -337,7 +336,7 @@ if __name__ == '__main__':
         
 
         
-plot_data(losses_fast, losses_slow, xlabel="loss", ylabel="iterations")
+plot_data(torch.tensor(losses_fast), torch.tensor(losses_slow), xlabel="loss", ylabel="iterations")
 print("timing avg: ", sum(times)/len(times))
 print("slow intg abg time: ", sum(slow_intg_time)/len(slow_intg_time))
 print("fast intg abg time: ", sum(fast_intg_time)/len(fast_intg_time))
