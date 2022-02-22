@@ -33,10 +33,6 @@ def profile(func):
  
         return result
     return wrapper
- 
-# instantiation of decorator function
-
-
 
 torch.pi = torch.acos(torch.zeros(1)).item() * 2
 
@@ -199,7 +195,7 @@ class ODEFunc_fast(nn.Module):
             nn.Tanh(),
             nn.Linear(50, dim_out),
         )
-
+        self.nfe = 0
         for m in self.net.modules():
             if isinstance(m, nn.Linear):
                 nn.init.normal_(m.weight, mean=0, std=0.1)
@@ -214,6 +210,7 @@ class ODEFunc_fast(nn.Module):
         y_other_dim = y_other_dim.reshape([len(y_other_dim), 1])
 
         input = torch.concat([y, y_other_dim], 1)
+        self.nfe += 1
         return self.net(torch.sin(input))
 
 #f_theta (slow ODE)
@@ -232,11 +229,12 @@ class ODEFunc_slow(nn.Module):
             if isinstance(m, nn.Linear):
                 nn.init.normal_(m.weight, mean=0, std=0.1)
                 nn.init.constant_(m.bias, val=0)
-
+        self.nfe = 0
     def forward(self, t, y, y_other_dim):
         y = y.reshape([len(y), 1])
         y_other_dim = y_other_dim.reshape([len(y_other_dim), 1])
         input = torch.concat([y, y_other_dim], 1)
+        self.nfe += 1
         return self.net(torch.sin(input))
        
 
@@ -280,9 +278,12 @@ if __name__ == '__main__':
     times = []
     slow_intg_time = []
     fast_intg_time = []
-
+    nfes = []
+    nfes_fast = []
     for itr in range(1, args.niters + 1):
-        print("----")
+        print("----", itr)
+        func.nfe = 0
+        func_fast.nfe = 0
         start = time.time()
         optimizer.zero_grad()
         optimizer_fast.zero_grad()
@@ -317,7 +318,10 @@ if __name__ == '__main__':
         else:
             losses_fast.append(float(loss_fast))
         losses_slow.append(float(loss))
-        
+        print("NFE: ", func.nfe, func_fast.nfe)
+        nfes.append(func.nfe)
+        nfes_fast.append(func_fast.nfe)
+
         
         if itr % args.test_freq == 0:
             print("----------------------------------------")
@@ -325,13 +329,13 @@ if __name__ == '__main__':
                 if(len(true_y0_fast) == 1):
                     true_y0_fast_lst = args.fast_step * [true_y0_fast]
                     true_y0_fast = true_y0_fast_lst
-                print(torch.tensor(true_y0_fast).shape)
                 pred_y, pred_y_fast, timing, fast_timing = odeint(func, torch.tensor([true_y0_slow]), torch.tensor(t_slow), torch.tensor(t_fast), func_fast=func_fast, y0_fast=torch.tensor(true_y0_fast).T, dt_fast=_dt_fast)
                 if itr % (args.niters/4) == 0:
                     plt.figure()
                     plt.plot(pred_y.reshape(len(pred_y), 1), label = "predicted")
                     plt.plot(slow, label = "true value")
                     plt.legend("upper right")
+                    plt.title("prediction" + str(itr))
                     plt.savefig("prediction" + str(itr))
 
                 loss = torch.mean(torch.abs(pred_y - slow))
@@ -345,7 +349,12 @@ if __name__ == '__main__':
         
 
         
-plot_data(torch.tensor(losses_fast), torch.tensor(losses_slow), xlabel="loss", ylabel="iterations")
-print("timing avg: ", sum(times)/len(times))
-print("slow intg abg time: ", sum(slow_intg_time)/len(slow_intg_time))
-print("fast intg abg time: ", sum(fast_intg_time)/len(fast_intg_time))
+    plot_data(torch.tensor(losses_fast), torch.tensor(losses_slow), xlabel="interation", ylabel="loss")
+    plot_data(torch.tensor(nfes_fast), torch.tensor(nfes), xlabel="iteration", ylabel="nfe")
+
+    print("timing avg: ", sum(times)/len(times))
+    print("slow intg abg time: ", sum(slow_intg_time)/len(slow_intg_time))
+    print("fast intg abg time: ", sum(fast_intg_time)/len(fast_intg_time))
+    print("NFE for fast ode: ", func.nfe)
+    print("NFE for slow ode: ", func_fast.nfe)
+
