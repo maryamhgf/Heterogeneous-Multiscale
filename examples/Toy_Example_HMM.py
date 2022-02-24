@@ -38,13 +38,13 @@ torch.pi = torch.acos(torch.zeros(1)).item() * 2
 
 parser = argparse.ArgumentParser('ODE demo')
 parser.add_argument('--method', type=str, choices=['dopri5', 'adams'], default='dopri5')
-parser.add_argument('--data_size', type=int, default=10000)
-parser.add_argument('--batch_time', type=int, default=1000)
+parser.add_argument('--data_size', type=int, default=500)
+parser.add_argument('--batch_time', type=int, default=100)
 parser.add_argument('--fast_batch_time', type=int, default=100)
-parser.add_argument('--batch_size', type=int, default=128)
-parser.add_argument('--niters', type=int, default=2000)
-parser.add_argument('--test_freq', type=int, default=100)
-parser.add_argument('--fast_step', type=int, default=15)
+parser.add_argument('--batch_size', type=int, default=64)
+parser.add_argument('--niters', type=int, default=1000)
+parser.add_argument('--test_freq', type=int, default=40)
+parser.add_argument('--fast_step', type=int, default=10)
 parser.add_argument('--viz', action='store_true')
 parser.add_argument('--gpu', type=int, default=0)
 parser.add_argument('--adjoint', action='store_true')
@@ -60,7 +60,7 @@ device = torch.device('cuda:' + str(args.gpu) if torch.cuda.is_available() else 
 
 
 def generate_stellar_orbits(a=2, b=3, epslion=0.009):
-    ts = torch.linspace(0., 0.1, args.data_size).to(device)
+    ts = torch.linspace(0., 0.03, args.data_size).to(device)
     data = []
     t_prev = ts[0]
     A = torch.tensor([[0., a, 0., 0.], [-a, 0., 0., 0.], [0., 0., 0., b], [0., 0., -b, 0.]])
@@ -82,9 +82,9 @@ def extract_modes(data, index_slow, index_fast):
 def time_series_sampling(slow, fast, data_t, slow_step_size=None, fast_step_size=None, fast_size=args.fast_step):
     dt = data_t[1] - data_t[0]
     if(slow_step_size == None):
-        slow_step_size = dt * 3
+        slow_step_size = dt * 12
     if(fast_step_size == None):
-        fast_step_size = dt
+        fast_step_size = dt/3
     slow_step = int(slow_step_size/dt)
     fast_step = int(fast_step_size/dt)
     if(slow_step == 0):
@@ -112,10 +112,10 @@ def convert_to_float(lst):
 true_y_0 = [torch.tensor([[1., 0., 1., 0]])]
 true_y0_slow, true_y0_fast = extract_modes(true_y_0, 0, 3)
 data, ts = generate_stellar_orbits()
-data_slow, data_fast = extract_modes(data, 0, 3)
+data_slow, data_fast = extract_modes(data, 0, 2)
 t_slow, t_fast, slow, fast = time_series_sampling(data_slow, data_fast, convert_to_float(ts))
 
-def plot_data(fast, slow, title=None, xlabel=None, ylabel=None):
+def plot_data(fast, slow, t_slow, t_fast, title=None, xlabel=None, ylabel=None):
     plt.figure()
     slow_int = convert_to_float(slow)
     if(len(fast.shape) == 2):
@@ -123,8 +123,8 @@ def plot_data(fast, slow, title=None, xlabel=None, ylabel=None):
         fast_one_dim.reshape([len(fast)])
         fast = fast_one_dim
     fast_int = convert_to_float(fast)
-    plt.plot(slow_int, label="slow")
-    plt.plot(fast_int, label="fast")
+    plt.plot(t_slow, slow_int, '--go', label="slow")
+    plt.plot(t_slow, fast_int, '--bo', label="fast")
     plt.legend(loc="upper left")
     if(title != None):
         plt.title(title)
@@ -132,12 +132,12 @@ def plot_data(fast, slow, title=None, xlabel=None, ylabel=None):
         plt.xlabel(xlabel)
     if(ylabel != None):
         plt.ylabel(ylabel)
-    plt.savefig("loss_midpoint.png")
-    plt.show()
+    plt.savefig(title+".png")
 
-plot_data(fast, slow)
+plot_data(fast, slow, t_slow, t_fast, title="input")
 def get_batch(true_y_slow, true_y_fast, ts, ts_fast):
     s = torch.from_numpy(np.random.choice(np.arange(len(ts) - args.batch_time, dtype=np.int64), args.batch_size, replace=False))
+    print("true y_fast", true_y_fast.shape, s.shape)
     batch_y0_slow = true_y_slow[s]  # (M, D)
     batch_y0_fast = true_y_fast[s]  # (M, D)
     batch_t = ts[:args.batch_time]  # (T)
@@ -240,16 +240,16 @@ if __name__ == '__main__':
     func = ODEFunc_slow().to(device)
     func_fast = ODEFunc_fast().to(device)
     
-    optimizer = optim.RMSprop(func.parameters(), lr=1e-1)
-    optimizer_fast = optim.RMSprop(func_fast.parameters(), lr=1e-1)
+    optimizer = optim.Adam(func.parameters(), lr=1e-1)
+    optimizer_fast = optim.Adam(func_fast.parameters(), lr=1e-2)
     
     
     end = time.time()
 
     time_meter = RunningAverageMeter(0.97)
     
-    loss_meter = RunningAverageMeter(0.97)
-    loss_meter_fast = RunningAverageMeter(0.97)
+    #loss_meter = RunningAverageMeter(0.97)
+    #loss_meter_fast = RunningAverageMeter(0.97)
     losses_fast = []
     losses_slow = []
     times = []
@@ -273,19 +273,17 @@ if __name__ == '__main__':
         tracemalloc.stop()
         slow_intg_time.append(timing)
         fast_intg_time.append(fast_timing)
-        loss = torch.mean(torch.abs(pred_y - batch_y_slow))
-        print("batch_y_fast.shape", batch_y_fast.shape)
-        loss_fast = torch.mean(torch.abs(pred_y_fast - batch_y_fast))
+        loss = torch.nn.functional.binary_cross_entropy_with_logits(pred_y, batch_y_slow)
+        loss_fast = torch.nn.functional.binary_cross_entropy_with_logits(pred_y_fast, batch_y_fast)
         
         loss.backward(retain_graph=True)
         loss_fast.backward(retain_graph=True)
         
         optimizer.step()
         optimizer_fast.step()
-        
-        time_meter.update(time.time() - end)
-        loss_meter.update(loss.item())
-        loss_meter_fast.update(loss_fast.item())
+
+        #loss_meter.update(loss.item())
+        #loss_meter_fast.update(loss_fast.item())
         print("loss (slow): ", float(loss), "loss (fast): ", float(loss_fast))
         if(float(loss_fast) >= 2):
             print("outlier")
@@ -308,16 +306,14 @@ if __name__ == '__main__':
                     true_y0_fast_lst = args.fast_step * [true_y0_fast]
                     true_y0_fast = true_y0_fast_lst
                 pred_y, pred_y_fast, timing, fast_timing = odeint(func, torch.tensor([true_y0_slow]), torch.tensor(t_slow), torch.tensor(t_fast), func_fast=func_fast, y0_fast=torch.tensor(true_y0_fast).T, dt_fast=_dt_fast)
-                if itr % (args.niters/4) == 0:
-                    plt.figure()
-                    plt.plot(pred_y.reshape(len(pred_y), 1), label = "predicted")
-                    plt.plot(slow, label = "true value")
-                    plt.legend("upper right")
-                    plt.title("prediction" + str(itr))
-                    plt.savefig("prediction" + str(itr))
-
-                loss = torch.mean(torch.abs(pred_y - slow))
-                loss_fast = torch.mean(torch.abs(pred_y_fast - fast))
+                plt.figure()
+                plt.plot(pred_y.reshape(len(pred_y), 1), label = "predicted")
+                plt.plot(slow, label = "true value")
+                plt.legend("upper right")
+                plt.title("prediction" + str(itr))
+                plt.savefig("prediction" + str(itr))
+                loss = torch.nn.functional.binary_cross_entropy_with_logits(pred_y.reshape(len(pred_y)), slow)
+                loss_fast = torch.nn.functional.binary_cross_entropy_with_logits(pred_y_fast.reshape(fast.shape), fast)
                 print('[slow] Iter {:04d} | Total Loss {:.6f}'.format(itr, loss.item()))
                 print('[fast] Iter {:04d} | Total Loss {:.6f}'.format(itr, loss_fast.item()))
                 ii += 1
@@ -327,8 +323,8 @@ if __name__ == '__main__':
         
 
         
-    plot_data(torch.tensor(losses_fast), torch.tensor(losses_slow), xlabel="interation", ylabel="loss")
-    plot_data(torch.tensor(nfes_fast), torch.tensor(nfes), xlabel="iteration", ylabel="nfe")
+    plot_data(torch.tensor(losses_fast), torch.tensor(losses_slow), t_slow, t_fast, xlabel="interation", ylabel="loss", title="loss")
+    #plot_data(torch.tensor(nfes_fast), torch.tensor(nfes), xlabel="iteration", ylabel="nfe")
 
     print("timing avg: ", sum(times)/len(times))
     print("slow intg abg time: ", sum(slow_intg_time)/len(slow_intg_time))
