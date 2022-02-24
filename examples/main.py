@@ -7,16 +7,12 @@ import matplotlib.pyplot as plt
 import torch
 import torch.utils.data as data
 import torch.nn as nn
-import pytorch_lightning as pl
 import sys
 import pickle 
 from torchdyn.core import NeuralODE
-from torchdyn.nn import DataControl, DepthCat, Augmenter, GalLinear, Fourier
 from torchdyn.datasets import *
 from torchdyn.utils import *
 
-import torchvision
-from torchsummary import summary
 import pandas as pd 
 #from torchdyn.dataset_utils.data_utils import get_dataloader
 import numpy as np
@@ -36,8 +32,8 @@ parser.add_argument('--fro_steps', type=int, default=2)
 parser.add_argument('--cutoff', type=int, default=2000)
 parser.add_argument('--freq', type=int, default=20)
 parser.add_argument('--data', type=str, default='multiscale')
-parser.add_argument('--fast_epochs', type=int, default=20)
-parser.add_argument('--fast_samples', type=int, default=20)
+parser.add_argument('--fast_epochs', type=int, default=2)
+parser.add_argument('--fast_samples', type=int, default=10)
 parser.add_argument('--length_of_intervals', type=int, default=50)
 
 
@@ -50,12 +46,12 @@ def get_kernel(shape):
 def get_estimation(network, fast_series, slow_value):
     values = []
     for x in fast_series:
-        x = torch.unsqueeze(x, 0)
+        x = x.unsqueeze(0)
         features = torch.cat([slow_value, x], dim=1)
-        values.append(network(features))
-    values = torch.cat(values)
-    kernels = get_kernel(values.shape)
-    estimation = torch.unsqueeze(torch.mean(kernels * values, 0), 0)
+        values = values + [network(features)]
+    values = torch.cat(values).clone()
+    kernels = get_kernel(values.shape).clone()
+    estimation = torch.mean(kernels * values, 0).unsqueeze(0)
     return estimation
     
 
@@ -146,12 +142,12 @@ dim_slow = 2
 net_slow = nn.Sequential(
     #features: the init value and the x_fast_est
     nn.Linear(dim_slow + dim_fast, 50, bias = False),
-    nn.Tanh(),
+    nn.ReLU(inplace=False),
     nn.Linear(50, dim_slow, bias = False))
 
 net_fast = nn.Sequential(
     nn.Linear(dim_fast, 50, bias = False),
-    nn.Tanh(),
+    nn.ReLU(inplace=False),
     nn.Linear(50, dim_fast, bias = False))
 
 X_slow = X[[0, 1], :]
@@ -161,7 +157,7 @@ X_fast = X[[2, 3], :]
 neuralDE_slow = NeuralODE(net_slow, sensitivity='interpolated_adjoint', solver='euler').to(device)
 neuralDE_fast = NeuralODE(net_fast, sensitivity='interpolated_adjoint', solver='euler').to(device)
 
-optim_slow = torch.optim.Adam(neuralDE_slow.parameters(), lr=1)
+optim_slow = torch.optim.Adam(net_slow.parameters(), lr=1)
 optim_fast = torch.optim.Adam(neuralDE_fast.parameters(), lr=1)
 
 scheduler_slow = torch.optim.lr_scheduler.MultiStepLR(optim_slow, milestones=[900,1300], gamma=2)
@@ -179,11 +175,11 @@ x0_fast = torch.unsqueeze(x0_fast, 0)
 x0_slow = torch.unsqueeze(x0_slow, 0)
 print("after squeez x0 fast: ", x0_fast.shape, "x0_slow: ", x0_slow.shape)
 
-predicted_slow_series = []
-t_slow_eval = []
-t_fast_eval = []
 dt = t_span[args.length_of_intervals] - t_span[0] 
+
 for iter in range(args.nepochs):
+    predicted_slow_series = []
+    t_slow_eval = []
     print("iters: ", iter)
     for i in range(int(len(t_span)/args.length_of_intervals)):#t_sapan_slow
         t_start = i*args.length_of_intervals
@@ -192,6 +188,7 @@ for iter in range(args.nepochs):
         optim_slow.zero_grad()
         optim_fast.zero_grad()
         #for the fast series part
+
         for j in range(args.fast_epochs):
             t_eval_fast, pred_fast = neuralDE_fast(x0_fast, t_span[t_start: t_start+args.fast_samples])
             pred_fast = torch.squeeze(pred_fast)                                                  
@@ -199,26 +196,23 @@ for iter in range(args.nepochs):
             X_fast_eval = X_fast[:, t_fast_eval]
             loss_fast = loss_fn_fast(pred_fast.T, X_fast_eval)
             loss_fast.backward(retain_graph=True)
-
-        print("loss fast, iter: "+str(iter), float(loss_fast))
-        
-        optim_fast.step()
-        scheduler_fast.step()
-        
+            print("loss fast, iter["+str(iter)+"]", float(loss_fast))
+            optim_fast.step()
+            scheduler_fast.step()
         estimation = get_estimation(net_slow, pred_fast, x0_slow)
         predicted_slow = x0_slow + dt*estimation
         x0_slow = predicted_slow
-        predicted_slow_series.append(predicted_slow)
+        predicted_slow_series = predicted_slow_series + [predicted_slow]
+        t_slow_eval = t_slow_eval +[(i + 1)*args.length_of_intervals - 1]
         pred_slow = torch.cat(predicted_slow_series)
-        t_slow_eval.append((i + 1)*args.length_of_intervals - 1)
-
-    print("slow...")
-    X_slow_eval = X_slow[:, t_slow_eval]
-    loss_slow = loss_fn_slow(pred_slow.T, X_slow_eval)
-    loss_slow.backward(retain_graph=True)
-    print("loss slow"+str(iter), float(loss_slow))
-    optim_slow.step()
-    scheduler_slow.step()
+        print("slow...")
+        X_slow_eval = X_slow[:, t_slow_eval]
+        loss_slow = loss_fn_slow(pred_slow.T, X_slow_eval)
+        loss_slow.backward(retain_graph=True)
+        print("loss slow, iter["+str(iter)+"]", float(loss_slow))
+        optim_slow.step()
+        scheduler_slow.step()
+    
 '''
 if i%args.freq == 0:
     with torch.no_grad():
