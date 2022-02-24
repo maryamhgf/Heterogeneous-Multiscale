@@ -199,20 +199,20 @@ for iter in range(args.nepochs):
             print("loss fast, iter["+str(iter)+"]", float(loss_fast))
             optim_fast.step()
             scheduler_fast.step()
-        with torch.autograd.set_detect_anomaly(True):
-            estimation = get_estimation(net_slow, pred_fast, x0_slow)
-            predicted_slow = x0_slow + dt*estimation
-            x0_slow = predicted_slow
-            predicted_slow_series = predicted_slow_series + [predicted_slow]
-            t_slow_eval = t_slow_eval +[(i + 1)*args.length_of_intervals - 1]
-            pred_slow = torch.cat(predicted_slow_series)
-            print("slow...")
-            X_slow_eval = X_slow[:, t_slow_eval]
-            loss_slow = loss_fn_slow(pred_slow.T, X_slow_eval)
-            loss_slow.backward(retain_graph=True)
-            print("loss slow, iter["+str(iter)+"]", float(loss_slow))
-            optim_slow.step()
-            scheduler_slow.step()
+    with torch.autograd.set_detect_anomaly(True):
+        estimation = get_estimation(net_slow, pred_fast, x0_slow)
+        predicted_slow = x0_slow + dt*estimation
+        x0_slow = predicted_slow
+        predicted_slow_series = predicted_slow_series + [predicted_slow]
+        t_slow_eval = t_slow_eval +[(i + 1)*args.length_of_intervals - 1]
+        pred_slow = torch.cat(predicted_slow_series)
+        print("slow...")
+        X_slow_eval = X_slow[:, t_slow_eval]
+        loss_slow = loss_fn_slow(pred_slow.T, X_slow_eval)
+        loss_slow.backward(retain_graph=True)
+        print("loss slow, iter["+str(iter)+"]", float(loss_slow))
+        optim_slow.step()
+        scheduler_slow.step()
         
 '''
 if i%args.freq == 0:
