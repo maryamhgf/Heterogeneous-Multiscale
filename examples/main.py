@@ -3,6 +3,7 @@
 # ==================================================================
 
 import argparse
+from random import uniform
 import matplotlib.pyplot as plt
 import torch
 import torch.utils.data as data
@@ -12,6 +13,7 @@ import pickle
 from torchdyn.core import NeuralODE
 from torchdyn.datasets import *
 from torchdyn.utils import *
+import os
 
 import pandas as pd 
 #from torchdyn.dataset_utils.data_utils import get_dataloader
@@ -35,20 +37,44 @@ parser.add_argument('--data', type=str, default='multiscale')
 parser.add_argument('--fast_epochs', type=int, default=10)
 parser.add_argument('--fast_samples', type=int, default=10)
 parser.add_argument('--length_of_intervals', type=int, default=200)
+parser.add_argument('--kernel_method', type=str, default='exp')
 
 
 args = parser.parse_args()
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-def get_kernel(shape):
-    return torch.full(shape, 1)
+dirName = "./slow_step" + str(args.length_of_intervals)+"_fast_step"+str(args.fast_samples)\
+    +"_kernel"+args.kernel_method+"_cutoff"+str(args.cutoff)+"_nepoch"+str(args.nepochs)+"_fast_nepoch"+str(args.fast_epochs)
 
-def get_estimation(network, fast_series, slow_value, shape):
-    kernels = get_kernel(slow_value.shape)
+if not os.path.exists(dirName):
+    os.mkdir(dirName)
+    print("Directory " , dirName ,  " Created ")
+else:    
+    print("Directory " , dirName ,  " already exists")
+
+result_dir = os.path.join(dirName, 'Results/')
+
+def get_kernel(shape, method='uniform', t=None, C=0.003):
+    if method == 'uniform':
+        return torch.full(shape, 1)
+    
+    if method == 'exp':
+        assert t != None
+        t_cat = t.repeat(shape[1]).reshape(shape)
+        return 1/ torch.exp(5 / (t_cat**2 - 1))
+    
+    if method == 'cos':
+        assert t != None
+        t_cat = t.repeat(shape[1]).reshape(shape)
+        return 0.5 * (1 + torch.cos(np.pi * t_cat))
+
+def get_estimation(network, fast_series, slow_value, shape, t_eval_fast):
+    kernels = get_kernel(fast_series.shape, method=args.kernel_method, t=t_eval_fast)
     slow_value_squeezes = torch.squeeze(slow_value, 0)
     slow_calue_spanned =slow_value_squeezes.repeat(len(fast_series)).reshape(shape)
     features = torch.cat([slow_calue_spanned, fast_series], dim=1)
     results = network(features.clone().detach())
+
     estimation = torch.mean(kernels * results, 0)
     estimation_unsq = torch.unsqueeze(estimation, 0)
     return estimation_unsq
@@ -208,7 +234,7 @@ for iter in range(args.nepochs):
         optim_fast.step()
         scheduler_fast.step()
         print(str(i) + "th point: loss fast, iter["+str(iter)+"]", float(loss_fast))
-        estimation = get_estimation(net_slow, pred_fast.clone().detach(), x0_slow.clone().detach(), pred_fast.shape)
+        estimation = get_estimation(net_slow, pred_fast.clone().detach(), x0_slow.clone().detach(), pred_fast.shape, torch.tensor(t_fast_eval))
         predicted_slow = x0_slow.clone().detach() + dt*estimation
         x0_slow = predicted_slow
         
@@ -232,21 +258,22 @@ for iter in range(args.nepochs):
             prediction = pred_slow.T
             prediction = prediction[0].numpy()
             plt.figure()
-            plt.plot(prediction, label = "predicted")
-            plt.plot(real, label = "true value")
+            plt.plot(prediction, label ="predicted")
+            plt.plot(real, label="true value")
             plt.legend("upper right")
             plt.title("prediction (mode=1)" + str(iter))
-            plt.savefig("prediction" + str(iter)+"mode 0")
+            plt.savefig(dirName+"/prediction" + str(iter)+"mode 0")
             real = X_slow[1, t_slow_eval].detach().numpy()
             prediction = pred_slow.T
             prediction = prediction[1].numpy()
             plt.figure()
-            plt.plot(prediction, label = "predicted")
-            plt.plot(real, label = "true value")
+            plt.plot(prediction, label="predicted")
+            plt.plot(real, label="true value")
             plt.legend("upper right")
             plt.title("prediction (mode=2)" + str(iter))
-            plt.savefig("prediction" + str(iter)+"mode 1")
+            plt.savefig(dirName+"/prediction" + str(iter)+"mode 1")
+
 
 plt.figure()
 plt.plot(losses)
-plt.savefig("losses.png")
+plt.savefig(dirName+"/losses.png")
