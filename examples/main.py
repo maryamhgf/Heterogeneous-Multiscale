@@ -27,13 +27,13 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--rerun', type=eval, default=False, choices=[True, False])
 parser.add_argument('--dmd', type=eval, default=False, choices=[True, False])
 parser.add_argument('--fro', type=eval, default=False, choices=[True, False])
-parser.add_argument('--nepochs', type=int, default=400)
+parser.add_argument('--nepochs', type=int, default=100)
 parser.add_argument('--fro_steps', type=int, default=2)
-parser.add_argument('--cutoff', type=int, default=2000)
-parser.add_argument('--freq', type=int, default=20)
+parser.add_argument('--cutoff', type=int, default=3000)
+parser.add_argument('--freq', type=int, default=50)
 parser.add_argument('--data', type=str, default='multiscale')
-parser.add_argument('--fast_epochs', type=int, default=50)
-parser.add_argument('--fast_samples', type=int, default=100)
+parser.add_argument('--fast_epochs', type=int, default=10)
+parser.add_argument('--fast_samples', type=int, default=10)
 parser.add_argument('--length_of_intervals', type=int, default=200)
 
 
@@ -235,9 +235,8 @@ for iter in range(args.nepochs):
             plt.plot(prediction, label = "predicted")
             plt.plot(real, label = "true value")
             plt.legend("upper right")
-            plt.title("prediction" + str(iter))
+            plt.title("prediction (mode=1)" + str(iter))
             plt.savefig("prediction" + str(iter)+"mode 0")
-
             real = X_slow[1, t_slow_eval].detach().numpy()
             prediction = pred_slow.T
             prediction = prediction[1].numpy()
@@ -245,9 +244,9 @@ for iter in range(args.nepochs):
             plt.plot(prediction, label = "predicted")
             plt.plot(real, label = "true value")
             plt.legend("upper right")
-            plt.title("prediction" + str(iter))
+            plt.title("prediction (mode=2)" + str(iter))
             plt.savefig("prediction" + str(iter)+"mode 1")
 
-
+plt.figure()
 plt.plot(losses)
 plt.savefig("losses.png")
