@@ -186,7 +186,7 @@ x0_fast = torch.unsqueeze(x0_fast, 0)
 x0_slow = torch.unsqueeze(x0_slow, 0)
 
 dt = t_span[args.length_of_intervals] - t_span[0] 
-
+losses = []
 for iter in range(args.nepochs):
     predicted_slow_series = [x0_slow.clone().detach()]
     t_slow_eval = [0]
@@ -219,18 +219,35 @@ for iter in range(args.nepochs):
     loss_slow = loss_fn_slow(pred_slow.T, X_slow_eval)
     loss_slow.backward(retain_graph=True)
     print("loss slow, iter["+str(iter)+"]", float(loss_slow))
+    losses.append(loss_slow.item())
     optim_slow.step()
     scheduler_slow.step()
-'''
-if i%args.freq == 0:
-    with torch.no_grad():
-        # fix this part as well, this is for plotting
-        t_plot = t_eval_slow[1:]
-        # L = len(t_plot)
-        real = X[0, 0:L].detach().numpy()
-        prediction = pred_[0:L, 0].detach().numpy()
-        plt.plot(t_plot, prediction)
-        plt.plot(t_plot, real)
-        plt.legend(['predict train', 'real train'])
-        plt.show()
-'''
+    if iter%args.freq == 0:
+        with torch.no_grad():
+            t_plot = t_slow_eval
+            # L = len(t_plot)
+            real = X_slow_eval[0].detach().numpy()
+            print("real: ", real.shape)
+            print(pred_slow.shape)
+            prediction = pred_slow.T
+            prediction = prediction[0].numpy()
+            plt.figure()
+            plt.plot(prediction, label = "predicted")
+            plt.plot(real, label = "true value")
+            plt.legend("upper right")
+            plt.title("prediction" + str(iter))
+            plt.savefig("prediction" + str(iter)+"mode 0")
+
+            real = X_slow[1, t_slow_eval].detach().numpy()
+            prediction = pred_slow.T
+            prediction = prediction[1].numpy()
+            plt.figure()
+            plt.plot(prediction, label = "predicted")
+            plt.plot(real, label = "true value")
+            plt.legend("upper right")
+            plt.title("prediction" + str(iter))
+            plt.savefig("prediction" + str(iter)+"mode 1")
+
+
+plt.plot(losses)
+plt.savefig("losses.png")
