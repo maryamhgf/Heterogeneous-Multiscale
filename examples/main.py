@@ -13,7 +13,9 @@ import pickle
 from torchdyn.core import NeuralODE
 from torchdyn.datasets import *
 from torchdyn.utils import *
+import time
 import os
+import tracemalloc
 
 import pandas as pd 
 #from torchdyn.dataset_utils.data_utils import get_dataloader
@@ -29,14 +31,15 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--rerun', type=eval, default=False, choices=[True, False])
 parser.add_argument('--dmd', type=eval, default=False, choices=[True, False])
 parser.add_argument('--fro', type=eval, default=False, choices=[True, False])
-parser.add_argument('--nepochs', type=int, default=100)
+parser.add_argument('--nepochs', type=int, default=80)
 parser.add_argument('--fro_steps', type=int, default=2)
 parser.add_argument('--cutoff', type=int, default=3000)
 parser.add_argument('--freq', type=int, default=50)
 parser.add_argument('--data', type=str, default='multiscale')
-parser.add_argument('--fast_epochs', type=int, default=10)
-parser.add_argument('--fast_samples', type=int, default=10)
-parser.add_argument('--length_of_intervals', type=int, default=200)
+parser.add_argument('--fast_epochs', type=int, default=2)
+parser.add_argument('--fast_samples', type=int, default=5)
+parser.add_argument('--fast_length_of_intervals', type=int, default=1)
+parser.add_argument('--length_of_intervals', type=int, default=100)
 parser.add_argument('--kernel_method', type=str, default='exp')
 
 
@@ -44,7 +47,7 @@ args = parser.parse_args()
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 dirName = "./slow_step" + str(args.length_of_intervals)+"_fast_step"+str(args.fast_samples)\
-    +"_kernel"+args.kernel_method+"_cutoff"+str(args.cutoff)+"_nepoch"+str(args.nepochs)+"_fast_nepoch"+str(args.fast_epochs)
+    +"_kernel"+args.kernel_method+"_cutoff"+str(args.cutoff)+"_nepoch"+str(args.nepochs)+"_fast_nepoch"+str(args.fast_epochs)+"_fast_step_length"+str(args.fast_length_of_intervals)
 
 if not os.path.exists(dirName):
     os.mkdir(dirName)
@@ -68,6 +71,16 @@ def get_kernel(shape, method='uniform', t=None, C=0.003):
         t_cat = t.repeat(shape[1]).reshape(shape)
         return 0.5 * (1 + torch.cos(np.pi * t_cat))
 
+def store_data(loss, memory, time):
+    data = {
+    'loss': loss,
+    'memory': memory,
+    'time': time
+    }
+    dataframe = pd.DataFrame(data)
+    dataframe.to_csv(dirName+"/train_inf.csv")
+
+
 def get_estimation(network, fast_series, slow_value, shape, t_eval_fast):
     kernels = get_kernel(fast_series.shape, method=args.kernel_method, t=t_eval_fast)
     slow_value_squeezes = torch.squeeze(slow_value, 0)
@@ -79,8 +92,8 @@ def get_estimation(network, fast_series, slow_value, shape, t_eval_fast):
     estimation_unsq = torch.unsqueeze(estimation, 0)
     return estimation_unsq
 
-def get_fast_prediction(t_span, x0_fast_, x0_slow, fast_epochs, length_of_intervals, t_start):
-    dt = t_span[1] - t_span[0]
+def get_fast_prediction(t_span, x0_fast_, x0_slow, fast_epochs, length_of_intervals, t_start, fast_step=1):
+    dt = t_span[fast_step] - t_span[0]
     x0_fast = x0_fast_
     predicted_series = [x0_fast]
     t_fast_eval = [t_start]
@@ -90,9 +103,8 @@ def get_fast_prediction(t_span, x0_fast_, x0_slow, fast_epochs, length_of_interv
         x0_fast = predicted
         features = torch.concat((x0_fast, x0_slow), dim=1)
         predicted_series = predicted_series + [predicted]
-        t_fast_eval = t_fast_eval +[t_fast_eval[-1] + 1]
+        t_fast_eval = t_fast_eval +[t_fast_eval[-1] + fast_step]
     pred_fast = torch.cat(predicted_series[0: len(predicted_series) - 1])
-
     return pred_fast, t_fast_eval[0: len(t_fast_eval)-1]
 
 
@@ -198,7 +210,7 @@ neuralDE_slow = NeuralODE(net_slow, sensitivity='interpolated_adjoint', solver='
 neuralDE_fast = NeuralODE(net_fast, sensitivity='interpolated_adjoint', solver='euler').to(device)
 
 optim_slow = torch.optim.Adam(net_slow.parameters(), lr=1)
-optim_fast = torch.optim.Adam(neuralDE_fast.parameters(), lr=1)
+optim_fast = torch.optim.Adam(net_fast.parameters(), lr=1)
 
 scheduler_slow = torch.optim.lr_scheduler.MultiStepLR(optim_slow, milestones=[900,1300], gamma=2)
 scheduler_fast = torch.optim.lr_scheduler.MultiStepLR(optim_fast, milestones=[900,1300], gamma=2)
@@ -213,7 +225,11 @@ x0_slow = torch.unsqueeze(x0_slow, 0)
 
 dt = t_span[args.length_of_intervals] - t_span[0] 
 losses = []
+times = []
+memory = []
 for iter in range(args.nepochs):
+    start = time.time()
+    tracemalloc.start()
     predicted_slow_series = [x0_slow.clone().detach()]
     t_slow_eval = [0]
     optim_slow.zero_grad()
@@ -221,12 +237,12 @@ for iter in range(args.nepochs):
     print("-----------iters: ", iter)
     for i in range(int(len(t_span)/args.length_of_intervals)):#t_sapan_slow
         t_start = i*args.length_of_intervals
-        t_interval = t_span[t_start: t_start+args.length_of_intervals]
-        t_interval_fast = t_span[t_start: t_start+args.fast_samples]
+        t_interval_fast = t_span[t_start: t_start+args.fast_samples * args.fast_length_of_intervals]
         x0_fast = X[[2, 3], t_start]
         x0_fast = torch.unsqueeze(x0_fast, 0)
         #for the fast series part
-        pred_fast, t_fast_eval = get_fast_prediction(t_interval_fast, x0_fast.clone().detach(), x0_slow.clone().detach(), args.fast_epochs, args.fast_samples, t_start)
+        pred_fast, t_fast_eval = get_fast_prediction(t_interval_fast, x0_fast.clone().detach(), x0_slow.clone().detach(), \
+            args.fast_epochs, args.fast_samples, t_start, fast_step=args.fast_length_of_intervals)
     
         X_fast_eval = X_fast[:, t_fast_eval]
         loss_fast = loss_fn_slow(pred_fast.T, X_fast_eval)
@@ -237,7 +253,6 @@ for iter in range(args.nepochs):
         estimation = get_estimation(net_slow, pred_fast.clone().detach(), x0_slow.clone().detach(), pred_fast.shape, torch.tensor(t_fast_eval))
         predicted_slow = x0_slow.clone().detach() + dt*estimation
         x0_slow = predicted_slow
-        
         predicted_slow_series = predicted_slow_series + [predicted_slow]
         t_slow_eval = t_slow_eval +[(i + 1)*args.length_of_intervals - 1]
     pred_slow = torch.cat(predicted_slow_series[0:len(predicted_slow_series)-1])
@@ -248,32 +263,47 @@ for iter in range(args.nepochs):
     losses.append(loss_slow.item())
     optim_slow.step()
     scheduler_slow.step()
-    if iter%args.freq == 0:
+    current, peak = tracemalloc.get_traced_memory()
+    memory.append(current / 10**6)
+    if (iter%args.freq == 0 and iter != 0) or iter == args.nepochs - 1:
         with torch.no_grad():
             t_plot = t_slow_eval
             # L = len(t_plot)
-            real = X_slow_eval[0].detach().numpy()
-            print("real: ", real.shape)
-            print(pred_slow.shape)
+            real0 = X_slow_eval[0].detach().numpy()
             prediction = pred_slow.T
-            prediction = prediction[0].numpy()
+            prediction0 = prediction[0].numpy()
             plt.figure()
-            plt.plot(prediction, label ="predicted")
-            plt.plot(real, label="true value")
+            plt.plot(prediction0, label ="predicted")
+            plt.plot(real0, label="true value")
             plt.legend("upper right")
             plt.title("prediction (mode=1)" + str(iter))
             plt.savefig(dirName+"/prediction" + str(iter)+"mode 0")
-            real = X_slow[1, t_slow_eval].detach().numpy()
-            prediction = pred_slow.T
-            prediction = prediction[1].numpy()
+            real1 = X_slow[1, t_slow_eval].detach().numpy()
+            prediction1 = prediction[1].numpy()
             plt.figure()
-            plt.plot(prediction, label="predicted")
-            plt.plot(real, label="true value")
+            plt.plot(prediction1, label="predicted")
+            plt.plot(real1, label="true value")
             plt.legend("upper right")
             plt.title("prediction (mode=2)" + str(iter))
             plt.savefig(dirName+"/prediction" + str(iter)+"mode 1")
-
+    times.append(time.time() - start)
 
 plt.figure()
 plt.plot(losses)
-plt.savefig(dirName+"/losses.png")
+plt.title("train loss")
+plt.xlabel("epoch")
+plt.ylabel("loss")
+plt.savefig(dirName+"/train_losses.png")
+
+
+data = {
+   'Name': ['Hafeez', 'Aslan', 'Kareem'],
+   'Age': [19, 18, 15],
+   'Profession': ['Pythoneer', 'Programmer', 'Student']
+}
+store_data(losses, memory, times)
+
+torch.save(real0, dirName+"/real0_data")
+torch.save(real1, dirName+"/real1_data")
+torch.save(prediction0, dirName+"/prediction0_data")
+torch.save(prediction1, dirName+"/prediction1_data")
