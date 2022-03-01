@@ -10,9 +10,11 @@ import torch.utils.data as data
 import torch.nn as nn
 import sys
 import pickle 
-from torchdyn.core import NeuralODE
-from torchdyn.datasets import *
-from torchdyn.utils import *
+# from torchdyn.core import NeuralODE
+# from torchdyn.datasets import *
+# from torchdyn.utils import *
+import sys
+sys.path.insert(0, '..')
 import time
 import os
 import tracemalloc
@@ -44,7 +46,8 @@ parser.add_argument('--kernel_method', type=str, default='exp')
 
 
 args = parser.parse_args()
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+# device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+device = torch.device("cpu")
 
 dirName = "./slow_step" + str(args.length_of_intervals)+"_fast_step"+str(args.fast_samples)\
     +"_kernel"+args.kernel_method+"_cutoff"+str(args.cutoff)+"_nepoch"+str(args.nepochs)+"_fast_nepoch"+str(args.fast_epochs)+"_fast_step_length"+str(args.fast_length_of_intervals)
@@ -156,7 +159,7 @@ if args.data == 'multiscale':
         a_file.close()
         print('Input file created and saved.')
     else:
-        a_file = open("data.pkl", "rb")
+        a_file = open("../data.pkl", "rb")
         X_dict = pickle.load(a_file)
         print('Input file loaded.')
         print("X_dict: ", len(X_dict), X_dict.keys(), len(X_dict[0.001]), X_dict[0.001].shape)
@@ -206,8 +209,8 @@ X_slow = X[[0, 1], :]
 X_fast = X[[2, 3], :]
 
 # Neural ODE and optimizer
-neuralDE_slow = NeuralODE(net_slow, sensitivity='interpolated_adjoint', solver='euler').to(device)
-neuralDE_fast = NeuralODE(net_fast, sensitivity='interpolated_adjoint', solver='euler').to(device)
+# neuralDE_slow = NeuralODE(net_slow, sensitivity='interpolated_adjoint', solver='euler').to(device)
+# neuralDE_fast = NeuralODE(net_fast, sensitivity='interpolated_adjoint', solver='euler').to(device)
 
 optim_slow = torch.optim.Adam(net_slow.parameters(), lr=1)
 optim_fast = torch.optim.Adam(net_fast.parameters(), lr=1)
@@ -263,6 +266,7 @@ for iter in range(args.nepochs):
     losses.append(loss_slow.item())
     optim_slow.step()
     scheduler_slow.step()
+    times.append(time.time() - start)
     current, peak = tracemalloc.get_traced_memory()
     memory.append(current / 10**6)
     if (iter%args.freq == 0 and iter != 0) or iter == args.nepochs - 1:
@@ -286,7 +290,6 @@ for iter in range(args.nepochs):
             plt.legend("upper right")
             plt.title("prediction (mode=2)" + str(iter))
             plt.savefig(dirName+"/prediction" + str(iter)+"mode 1")
-    times.append(time.time() - start)
 
 plt.figure()
 plt.plot(losses)
