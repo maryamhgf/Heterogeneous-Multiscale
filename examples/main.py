@@ -105,7 +105,8 @@ def get_estimation(network, fast_series, slow_value, shape, t_eval_fast):
     slow_calue_spanned = slow_value_squeezes.repeat(
         len(fast_series)).reshape(shape)
     features = torch.cat([slow_calue_spanned, fast_series], dim=1)
-    results = network(features.clone().detach())
+    results = network(None, features.clone().detach())[:, 2:]
+    # print(results.shape, results)
 
     estimation = torch.mean(kernels * results, 0)
     estimation_unsq = torch.unsqueeze(estimation, 0)
@@ -123,7 +124,6 @@ def get_fast_prediction(t_span, x0_fast_, x0_slow, fast_epochs, length_of_interv
     for i in range(length_of_intervals):
         if args.solver == 'Euler':
             predicted = x0_fast.clone().detach() + dt*net_fast(features)
-            print(predicted)
         if args.solver == 'dopri5':
             # solver = ode(net_fast)
             # solver.set_integrator(args.solver)
@@ -134,11 +134,12 @@ def get_fast_prediction(t_span, x0_fast_, x0_slow, fast_epochs, length_of_interv
             ts = torch.tensor([
                 t_span[0], t_span[fast_step]])
             # print(x0_fast.shape, ts.shape)
-            predicted = odeint(net_fast, features, ts)
-        x0_fast = predicted
-        print(x0_fast, x0_slow)
-        print(x0_fast.shape, x0_slow.shape)
-        features = torch.concat((x0_fast, x0_slow), dim=1)
+            features = odeint(net_fast, features, ts)[1]
+            predicted = features[:, 2:]
+        # x0_fast = predicted
+        # print(x0_fast, x0_slow)
+        # print(x0_fast.shape, x0_slow.shape)
+        # features = torch.concat((x0_fast, x0_slow), dim=1)
         predicted_series = predicted_series + [predicted]
         t_fast_eval = t_fast_eval + [t_fast_eval[-1] + fast_step]
     pred_fast = torch.cat(predicted_series[0: len(predicted_series) - 1])
@@ -248,7 +249,6 @@ class ODEfunc(nn.Module):
         out = self.linear_in(x)
         out = self.relu(out)
         out = self.linear_out(out)
-        print(slow, fast, out, x)
         if self.mode == 'fast':
             return torch.cat((slow, out), dim=1)
         else:
