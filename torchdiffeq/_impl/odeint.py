@@ -4,7 +4,7 @@ from .dopri5 import Dopri5Solver
 from .bosh3 import Bosh3Solver
 from .adaptive_heun import AdaptiveHeunSolver
 from .fehlberg2 import Fehlberg2
-from .fixed_grid import Euler, Midpoint, RK4, HMM
+from .fixed_grid import Euler, Midpoint, RK4
 from .fixed_adams import AdamsBashforth, AdamsBashforthMoulton
 from .dopri8 import Dopri8Solver
 from .scipy_wrapper import ScipyWrapperODESolver
@@ -25,24 +25,25 @@ SOLVERS = {
     'fixed_adams': AdamsBashforthMoulton,
     # ~Backwards compatibility
     'scipy_solver': ScipyWrapperODESolver,
-    'HMM': HMM
 }
 
 
-def odeint(func, y0, t, t_fast, *, rtol=1e-7, atol=1e-9, method=None, options=None, event_fn=None, func_fast=None, y0_fast=None, dt_fast=None):
+def odeint(func, y0, t, *, rtol=1e-7, atol=1e-9, method=None, options=None, event_fn=None):
     """Integrate a system of ordinary differential equations.
 
     Solves the initial value problem for a non-stiff system of first order ODEs:
         ```
         dy/dt = func(t, y), y(t[0]) = y0
-        for the fast var: dy_fast/dt = func_fast(t, y), y(t[0]) = y0_fast
         ```
     where y is a Tensor or tuple of Tensors of any shape.
 
     Output dtypes and numerical precision are based on the dtypes of the inputs `y0`.
 
     Args:
-        func: Function that maps a scalar Tensor `t` and a Tensor holddy/dt = func(t, y), y(t[0]) = y0]`. Optionally, `y0`
+        func: Function that maps a scalar Tensor `t` and a Tensor holding the state `y`
+            into a Tensor of state derivatives with respect to time. Optionally, `y`
+            can also be a tuple of Tensors.
+        y0: N-D Tensor giving starting value of `y` at time point `t[0]`. Optionally, `y0`
             can also be a tuple of Tensors.
         t: 1-D Tensor holding a sequence of time points for which to solve for
             `y`, in either increasing or decreasing order. The first element of
@@ -67,15 +68,15 @@ def odeint(func, y0, t, t_fast, *, rtol=1e-7, atol=1e-9, method=None, options=No
     Raises:
         ValueError: if an invalid `method` is provided.
     """
-    func_slow = func
-    if t.ndimension() != 1:
-        t = t.reshape(t.shape[1])
-    shapes, func, y0, t, rtol, atol, method, options, event_fn, t_is_reversed = _check_inputs(func, y0, t, rtol, atol, method, options, event_fn, SOLVERS)
 
-    solver = SOLVERS['HMM'](func=func_slow, y0=y0, rtol=rtol, atol=atol, func_fast=func_fast, y0_fast=y0_fast, 
-                                dt_fast=dt_fast, sampling_rate=sampling_rate, kernel='gaussian', **options)
+    shapes, func, y0, t, rtol, atol, method, options, event_fn, t_is_reversed = _check_inputs(
+        func, y0, t, rtol, atol, method, options, event_fn, SOLVERS)
+    print(method)
+
+    solver = SOLVERS[method](func=func, y0=y0, rtol=rtol, atol=atol, **options)
+
     if event_fn is None:
-        solution, solution_fast, timing, fast_timing = solver.integrate(t, t_fast)
+        solution = solver.integrate(t)
     else:
         event_t, solution = solver.integrate_until_event(t[0], event_fn)
         event_t = event_t.to(t)
@@ -86,9 +87,9 @@ def odeint(func, y0, t, t_fast, *, rtol=1e-7, atol=1e-9, method=None, options=No
         solution = _flat_to_shape(solution, (len(t),), shapes)
 
     if event_fn is None:
-        return solution, solution_fast, timing, fast_timing
+        return solution
     else:
-        return event_t, solution, solution_fast
+        return event_t, solution
 
 
 def odeint_event(func, y0, t0, *, event_fn, reverse_time=False, odeint_interface=odeint, **kwargs):
@@ -99,10 +100,12 @@ def odeint_event(func, y0, t0, *, event_fn, reverse_time=False, odeint_interface
     else:
         t = torch.cat([t0.reshape(-1), t0.reshape(-1).detach() + 1.0])
 
-    event_t, solution = odeint_interface(func, y0, t, event_fn=event_fn, **kwargs)
+    event_t, solution = odeint_interface(
+        func, y0, t, event_fn=event_fn, **kwargs)
 
     # Dummy values for rtol, atol, method, and options.
-    shapes, _func, _, t, _, _, _, _, event_fn, _ = _check_inputs(func, y0, t, 0.0, 0.0, None, None, event_fn, SOLVERS)
+    shapes, _func, _, t, _, _, _, _, event_fn, _ = _check_inputs(
+        func, y0, t, 0.0, 0.0, None, None, event_fn, SOLVERS)
 
     if shapes is not None:
         state_t = torch.cat([s[-1].reshape(-1) for s in solution])
@@ -113,7 +116,8 @@ def odeint_event(func, y0, t0, *, event_fn, reverse_time=False, odeint_interface
     if reverse_time:
         event_t = -event_t
 
-    event_t, state_t = ImplicitFnGradientRerouting.apply(_func, event_fn, event_t, state_t)
+    event_t, state_t = ImplicitFnGradientRerouting.apply(
+        _func, event_fn, event_t, state_t)
 
     # Return the user expected time value.
     if reverse_time:
@@ -121,7 +125,8 @@ def odeint_event(func, y0, t0, *, event_fn, reverse_time=False, odeint_interface
 
     if shapes is not None:
         state_t = _flat_to_shape(state_t, (), shapes)
-        solution = tuple(torch.cat([s[:-1], s_t[None]], dim=0) for s, s_t in zip(solution, state_t))
+        solution = tuple(torch.cat([s[:-1], s_t[None]], dim=0)
+                         for s, s_t in zip(solution, state_t))
     else:
         solution = torch.cat([solution[:-1], state_t[None]], dim=0)
 
