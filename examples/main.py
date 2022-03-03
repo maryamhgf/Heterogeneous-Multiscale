@@ -33,7 +33,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--rerun', type=eval, default=False, choices=[True, False])
 parser.add_argument('--dmd', type=eval, default=False, choices=[True, False])
 parser.add_argument('--fro', type=eval, default=False, choices=[True, False])
-parser.add_argument('--nepochs', type=int, default=1)
+parser.add_argument('--nepochs', type=int, default=80)
 parser.add_argument('--fro_steps', type=int, default=2)
 parser.add_argument('--cutoff', type=int, default=3000)
 parser.add_argument('--freq', type=int, default=50)
@@ -105,7 +105,8 @@ def get_estimation(network, fast_series, slow_value, shape, t_eval_fast):
     slow_calue_spanned = slow_value_squeezes.repeat(
         len(fast_series)).reshape(shape)
     features = torch.cat([slow_calue_spanned, fast_series], dim=1)
-    results = network(features.clone().detach())
+    results = network(None, features.clone().detach())[:, 2:]
+    # print(results.shape)
 
     estimation = torch.mean(kernels * results, 0)
     estimation_unsq = torch.unsqueeze(estimation, 0)
@@ -114,30 +115,22 @@ def get_estimation(network, fast_series, slow_value, shape, t_eval_fast):
 
 def get_fast_prediction(t_span, x0_fast_, x0_slow, fast_epochs, length_of_intervals, t_start, fast_step=1):
     dt = t_span[fast_step] - t_span[0]
+    # print(t_span.shape, t_span, length_of_intervals, t_start, x0_fast_)
     # print(t_span, length_of_intervals, t_start, dt.shape)
     x0_fast = x0_fast_
     predicted_series = [x0_fast]
     t_fast_eval = [t_start]
     features = torch.concat((x0_fast, x0_slow), dim=1)
     # print(x0_fast, t_span[0])
-    for i in range(length_of_intervals):
+    for i in range(length_of_intervals - 1):
         if args.solver == 'Euler':
             predicted = x0_fast.clone().detach() + dt*net_fast(features)
-            print(predicted)
         if args.solver == 'dopri5':
-            # solver = ode(net_fast)
-            # solver.set_integrator(args.solver)
-            # print(x0_fast, t_span[0].item())
-            # solver.set_initial_value(x0_fast, t_span[0].item())
-            # predicted = torch.tensor(solver.integrate(t_span[fast_step]))
-            # print(predicted)
             ts = torch.tensor([
-                t_span[0], t_span[fast_step]])
-            # print(x0_fast.shape, ts.shape)
-            predicted = odeint(net_fast, features, ts)
+                t_span[i], t_span[i+1]])
+            features = odeint(net_fast, features, ts)[1]
+            predicted = features[:, 2:]
         x0_fast = predicted
-        print(x0_fast, x0_slow)
-        print(x0_fast.shape, x0_slow.shape)
         features = torch.concat((x0_fast, x0_slow), dim=1)
         predicted_series = predicted_series + [predicted]
         t_fast_eval = t_fast_eval + [t_fast_eval[-1] + fast_step]
@@ -219,6 +212,7 @@ if args.data == 'multiscale':
     X = X_dict[0.001]
     X = torch.Tensor(X).to(device)
     t_span = torch.Tensor(t).to(device)
+    # print(t_span)
     cutoff = args.cutoff
     X = X[:, :cutoff]
     t_span = t_span[:cutoff]
@@ -244,11 +238,10 @@ class ODEfunc(nn.Module):
     def forward(self, t, x):
         # tt = torch.ones((1, 1)) * t
         # ttx = torch.cat([tt, x], 1)
-        slow, fast = x[:, :2], x[:, 2:]
+        slow, fast = x[:, :2].clone().detach(), x[:, 2:].clone().detach()
         out = self.linear_in(x)
         out = self.relu(out)
         out = self.linear_out(out)
-        print(slow, fast, out, x)
         if self.mode == 'fast':
             return torch.cat((slow, out), dim=1)
         else:
@@ -293,6 +286,7 @@ x0_fast = torch.unsqueeze(x0_fast, 0)
 x0_slow = torch.unsqueeze(x0_slow, 0)
 
 dt = t_span[args.length_of_intervals] - t_span[0]
+print(dt.shape, dt)
 losses = []
 times = []
 memory = []
@@ -308,7 +302,7 @@ for iter in range(args.nepochs):
         t_start = i*args.length_of_intervals
         t_interval_fast = t_span[t_start: t_start +
                                  args.fast_samples * args.fast_length_of_intervals]
-        x0_fast = X[[2, 3], t_start]
+        x0_fast = X[[2, 3], t_start]  # why?
         x0_fast = torch.unsqueeze(x0_fast, 0)
         # for the fast series part
         pred_fast, t_fast_eval = get_fast_prediction(t_interval_fast, x0_fast.clone().detach(), x0_slow.clone().detach(),
@@ -321,9 +315,15 @@ for iter in range(args.nepochs):
         scheduler_fast.step()
         print(
             str(i) + "th point: loss fast, iter["+str(iter)+"]", float(loss_fast))
-        estimation = get_estimation(net_slow, pred_fast.clone().detach(
-        ), x0_slow.clone().detach(), pred_fast.shape, torch.tensor(t_fast_eval))
+        estimation = get_estimation(net_slow, pred_fast.clone().detach(),
+                                    x0_slow.clone().detach(), pred_fast.shape, torch.tensor(t_fast_eval))
+        # if args.solver == 'Euler':
         predicted_slow = x0_slow.clone().detach() + dt*estimation
+        # if args.solver == 'dopri5':
+        #     ts = torch.tensor([
+        #         t_span[0], t_span[args.length_of_intervals]])
+        #     features = odeint(net_slow, estimation, ts)[1]
+        #     predicted_slow = features[:, 2:]
         x0_slow = predicted_slow
         predicted_slow_series = predicted_slow_series + [predicted_slow]
         t_slow_eval = t_slow_eval + [(i + 1)*args.length_of_intervals - 1]
