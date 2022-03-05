@@ -286,7 +286,7 @@ if args.baseline == False:
     x0_slow = torch.unsqueeze(x0_slow, 0)
 
     dt = t_span[args.length_of_intervals] - t_span[0]
-    losses = []
+    losses_slow, losses_fast = [], []
     times = []
     memory = []
     for iter in range(args.nepochs):
@@ -335,7 +335,8 @@ if args.baseline == False:
         time_iter = time.time() - start
         current, peak = tracemalloc.get_traced_memory()
         memory.append(current / 10**6)
-        losses.append(loss_slow.item())
+        losses_slow.append(loss_slow.item())
+        losses_fast.append(loss_fast.item())
         times.append(time_iter)
         print("loss slow, iter["+str(iter)+"]", float(loss_slow))
         if (args.test == True) and ((iter % args.freq == 0 and iter != 0) or iter == args.nepochs - 1):
@@ -360,14 +361,20 @@ if args.baseline == False:
                 plt.title("prediction (mode=2)" + str(iter))
                 plt.savefig(dirName+"/prediction" + str(iter)+"mode 1")
 
-    plt.figure()
-    plt.plot(losses)
+    plt.figure(figsize=(14, 7))
+    plt.subplot(1, 2, 1)
+    plt.plot(losses_slow)
+    plt.title("train loss")
+    plt.xlabel("epoch")
+    plt.ylabel("loss")
+    plt.subplot(1, 2, 2)
+    plt.plot(losses_fast)
     plt.title("train loss")
     plt.xlabel("epoch")
     plt.ylabel("loss")
     plt.savefig(dirName+"/train_losses.png")
 
-    store_data(losses, memory, times)
+    store_data(losses_slow, memory, times)
     if args.test:
         torch.save(real0, dirName+"/real0_data")
         torch.save(real1, dirName+"/real1_data")
@@ -447,7 +454,7 @@ else:
     plt.title("train loss")
     plt.xlabel("epoch")
     plt.ylabel("loss")
-    plt.savefig(dirName+"/train_losses.png")
+    plt.savefig(dirName+"/train_losses_slow.png")
 
     store_data(losses, memory, times)
     if args.test:
