@@ -106,7 +106,7 @@ def get_estimation(network, fast_series, slow_value, shape, t_eval_fast):
     slow_calue_spanned = slow_value_squeezes.repeat(
         len(fast_series)).reshape(shape)
     features = torch.cat([slow_calue_spanned, fast_series], dim=1)
-    results = network(None, features.clone().detach())[:, 2:]
+    results = network(None, features.clone().detach())[:, :2]
     # print(results.shape)
 
     estimation = torch.mean(kernels * results, 0)

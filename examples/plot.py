@@ -3,7 +3,7 @@ import pandas as pd
 import os
 import matplotlib.pyplot as plt
 
-inf_dir = "slow_step50_fast_step5_kernelexp_cutoff3000_nepoch400_fast_nepoch2_fast_step_length1_sensitivityautograd_solvereuler"
+inf_dir = "slow_step200_fast_step5_kernelexp_cutoff3000_nepoch400_fast_nepoch2_fast_step_length1_sensitivityautograd_solverdopri5"
 common = inf_dir + "/train_inf.csv"
 NODE_file = "./NODE/" + common
 NODE_HMM_file = "./NODE_HMM/" + common
@@ -15,18 +15,18 @@ data_NODE_HMM = pd.read_csv(NODE_HMM_file)
 folder = "./Comparison"
 if not os.path.exists(folder):
     os.mkdir(folder)
-    print("Directory " , folder ,  " Created ")
-else:    
-    print("Directory " , folder ,  " already exists")
+    print("Directory ", folder,  " Created ")
+else:
+    print("Directory ", folder,  " already exists")
 
 
 dirName = "./Comparison/" + inf_dir
 
 if not os.path.exists(dirName):
     os.mkdir(dirName)
-    print("Directory " , dirName ,  " Created ")
-else:    
-    print("Directory " , dirName ,  " already exists")
+    print("Directory ", dirName,  " Created ")
+else:
+    print("Directory ", dirName,  " already exists")
 
 plt.plot(data_NODE['loss'], label='NODE')
 plt.plot(data_NODE_HMM['loss'], label='NODE+HMM')
