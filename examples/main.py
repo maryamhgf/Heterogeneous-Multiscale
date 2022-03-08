@@ -41,7 +41,8 @@ parser.add_argument('--adjoint', type=eval,
 
 
 args = parser.parse_args()
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+# device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+device = torch.device("cpu")
 
 if args.baseline:
     folder = './NODE'
@@ -389,7 +390,7 @@ else:
 
     # Neural ODE
     neural_ODE = NeuralODE(neural_net, sensitivity='adjoint', solver='tsit5',
-                           atol=1e-3, rtol=1e-3).to(device)
+                           atol=1e-3, rtol=1e-3, rtol_adjoint=1e-3, atol_adjoint=1e-3).to(device)
     optim = torch.optim.Adam(neural_ODE.parameters(), lr=0.01)
     scheduler = torch.optim.lr_scheduler.MultiStepLR(
         optim, milestones=[50, 100], gamma=2)
