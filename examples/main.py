@@ -106,6 +106,7 @@ def get_estimation(network, fast_series, slow_value, shape, t_eval_fast):
     slow_calue_spanned = slow_value_squeezes.repeat(
         len(fast_series)).reshape(shape)
     features = torch.cat([slow_calue_spanned, fast_series], dim=1)
+    # features.shape = (5, 4)
     results = network(None, features.clone().detach())[:, :2]
     # print(results.shape)
 
@@ -116,8 +117,6 @@ def get_estimation(network, fast_series, slow_value, shape, t_eval_fast):
 
 def get_fast_prediction(t_span, x0_fast_, x0_slow, fast_epochs, length_of_intervals, t_start, fast_step=1):
     dt = t_span[fast_step] - t_span[0]
-    # print(t_span.shape, t_span, length_of_intervals, t_start, x0_fast_)
-    # print(t_span, length_of_intervals, t_start, dt.shape)
     x0_fast = x0_fast_
     predicted_series = [x0_fast]
     t_fast_eval = [t_start]
@@ -134,7 +133,6 @@ def get_fast_prediction(t_span, x0_fast_, x0_slow, fast_epochs, length_of_interv
         pred_fast = odeint(net_fast, features, t_span).squeeze(1)[:, 2:]
         for _ in range(length_of_intervals):
             t_fast_eval = t_fast_eval + [t_fast_eval[-1] + fast_step]
-    # print(pred_fast.shape,  t_fast_eval[0: len(t_fast_eval)-1])
     return pred_fast, t_fast_eval[0: len(t_fast_eval)-1]
 
 
@@ -316,8 +314,8 @@ if args.baseline == False:
             loss_fast.backward(retain_graph=True)
             optim_fast.step()
             scheduler_fast.step()
-            print(
-                str(i) + "th point: loss fast, iter["+str(iter)+"]", float(loss_fast))
+            # print(
+            # str(i) + "th point: loss fast, iter["+str(iter)+"]", float(loss_fast))
             estimation = get_estimation(net_slow, pred_fast.clone().detach(
             ), x0_slow.clone().detach(), pred_fast.shape, torch.tensor(t_fast_eval))
             predicted_slow = x0_slow.clone().detach() + dt*estimation
@@ -390,7 +388,7 @@ else:
         nn.Linear(50, dim_slow, bias=False))
 
     # Neural ODE
-    neural_ODE = NeuralODE(neural_net, solver='euler',
+    neural_ODE = NeuralODE(neural_net, sensitivity='adjoint', solver='tsit5',
                            atol=1e-3, rtol=1e-3).to(device)
     optim = torch.optim.Adam(neural_ODE.parameters(), lr=0.01)
     scheduler = torch.optim.lr_scheduler.MultiStepLR(
