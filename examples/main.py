@@ -35,7 +35,7 @@ parser.add_argument('--sesitivity', type=str, default="autograd")
 parser.add_argument('--cutoff', type=int, default=3000)
 parser.add_argument('--test', type=eval, default=True, choices=[True, False])
 parser.add_argument('--freq', type=int, default=50)
-parser.add_argument('--dataset', type=str, default='hopper')
+parser.add_argument('--dataset', type=str, default='hopper', choices=['hopper', 'multiscale'])
 parser.add_argument('--fast_epochs', type=int, default=2)
 parser.add_argument('--fast_samples', type=int, default=4)
 parser.add_argument('--fast_length_of_intervals', type=int, default=1)
@@ -119,28 +119,32 @@ def get_estimation(network, fast_series, slow_value, shape, t_eval_fast):
     slow_value_squeezes = torch.squeeze(slow_value, 0)
     slow_value_spanned =slow_value_squeezes.repeat(len(fast_series)).reshape((shape[0],-1))
     features = torch.cat([slow_value_spanned, fast_series], dim=1)
-    results = network(features.clone().detach())
+    # print(slow_value.shape[1])
+    results = network(None, features.clone().detach())[:, :slow_value.shape[1]]
     estimation = torch.mean(kernels * results, 0)
     estimation_unsq = torch.unsqueeze(estimation, 0)
     return estimation_unsq
 
 
 def get_fast_prediction(t_span, x0_fast_, x0_slow, fast_epochs, length_of_intervals, t_start, fast_step=1):
+    # print(x0_fast_.shape, x0_slow.shape)
+    dim_slow, dim_fast = x0_slow.shape[1], x0_fast_.shape[1]
     dt = t_span[fast_step] - t_span[0]
     x0_fast = x0_fast_
     predicted_series = [x0_fast]
     t_fast_eval = [t_start]
     features = torch.concat((x0_slow, x0_fast), dim=1)
     if args.solver == 'euler':
+        # print(x0_fast.clone().detach().shape, net_fast(None, features)[:, dim_slow:].shape)
         for _ in range(length_of_intervals - 1):
             x0_fast = x0_fast.clone().detach() + dt * \
-                net_fast(None, features)[:, 2:]
+                net_fast(None, features)[:, dim_slow:]
             predicted_series = predicted_series + [x0_fast]
             features = torch.concat((x0_slow, x0_fast), dim=1)
             t_fast_eval = t_fast_eval + [t_fast_eval[-1] + fast_step]
         pred_fast = torch.cat(predicted_series[0: len(predicted_series) - 1])
     if args.solver == 'dopri5':
-        pred_fast = odeint(net_fast, features, t_span).squeeze(1)[:, 2:]
+        pred_fast = odeint(net_fast, features, t_span).squeeze(1)[:, dim_slow:]
         for _ in range(length_of_intervals):
             t_fast_eval = t_fast_eval + [t_fast_eval[-1] + fast_step]
     return pred_fast, t_fast_eval[0: len(t_fast_eval)-1]
@@ -282,6 +286,7 @@ elif(args.dataset == "hopper"):
     samples_dataset = dataset[args.hopper_sample_num, :, :].T
     print(samples_dataset.shape)
     is_multi_freq, slow_dyn, fast_dyn = get_multi_freq_inf(samples_dataset)
+    print('!!!!', slow_dyn.shape, fast_dyn.shape)
     print(is_multi_freq)
     print("slow: ", slow_dyn.shape)
     print("fast:", fast_dyn.shape)
@@ -291,41 +296,41 @@ elif(args.dataset == "hopper"):
     
 if args.baseline == False:
     # define neural net
-    # class ODEfunc(nn.Module):
-    #     def __init__(self, out_dim, mode):
-    #         # store stores the slow mode if the func is for fast mode, vice versa
-    #         super(ODEfunc, self).__init__()
-    #         self.out_dim = out_dim
-    #         self.mode = mode
-    #         self.linear_in = nn.Linear(dim_slow + dim_fast, 50, bias=False)
-    #         self.relu = nn.ReLU(inplace=False)
-    #         self.linear_out = nn.Linear(50, out_dim, bias=False)
+    class ODEfunc(nn.Module):
+        def __init__(self, out_dim, mode):
+            # store stores the slow mode if the func is for fast mode, vice versa
+            super(ODEfunc, self).__init__()
+            self.out_dim = out_dim
+            self.mode = mode
+            self.linear_in = nn.Linear(dim_slow + dim_fast, 50, bias=False)
+            self.relu = nn.ReLU(inplace=False)
+            self.linear_out = nn.Linear(50, out_dim, bias=False)
 
-    #     def forward(self, t, x):
-    #         # tt = torch.ones((1, 1)) * t
-    #         # ttx = torch.cat([tt, x], 1)
-    #         slow, fast = x[:, :2].clone().detach(), x[:, 2:].clone().detach()
-    #         out = self.linear_in(x)
-    #         out = self.relu(out)
-    #         out = self.linear_out(out)
-    #         if self.mode == 'fast':
-    #             return torch.cat((slow, out), dim=1)
-    #         else:
-    #             return torch.cat((out, fast), dim=1)
+        def forward(self, t, x):
+            # tt = torch.ones((1, 1)) * t
+            # ttx = torch.cat([tt, x], 1)
+            slow, fast = x[:, :dim_slow].clone().detach(), x[:, dim_slow:].clone().detach()
+            out = self.linear_in(x)
+            out = self.relu(out)
+            out = self.linear_out(out)
+            if self.mode == 'fast':
+                return torch.cat((slow, out), dim=1)
+            else:
+                return torch.cat((out, fast), dim=1)
 
-    # net_slow = ODEfunc(dim_slow, 'slow')
-    # net_fast = ODEfunc(dim_fast, 'fast')
+    net_slow = ODEfunc(dim_slow, 'slow')
+    net_fast = ODEfunc(dim_fast, 'fast')
    
-    net_slow = nn.Sequential(
-        #features: the init value and the x_fast_est
-        nn.Linear(dim_slow + dim_fast, 50, bias = False),
-        nn.ReLU(inplace=False),
-        nn.Linear(50, dim_slow, bias = False))
+    # net_slow = nn.Sequential(
+    #     #features: the init value and the x_fast_est
+    #     nn.Linear(dim_slow + dim_fast, 50, bias = False),
+    #     nn.ReLU(inplace=False),
+    #     nn.Linear(50, dim_slow, bias = False))
 
-    net_fast = nn.Sequential(
-        nn.Linear(dim_fast + dim_slow, 50, bias = False),
-        nn.ReLU(inplace=False),
-        nn.Linear(50, dim_fast, bias = False))
+    # net_fast = nn.Sequential(
+    #     nn.Linear(dim_fast + dim_slow, 50, bias = False),
+    #     nn.ReLU(inplace=False),
+    #     nn.Linear(50, dim_fast, bias = False))
     if(args.dataset == "multiscale"):
         X_slow = X[[0, 1], :]
         X_fast = X[[2, 3], :]
