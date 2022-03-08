@@ -56,7 +56,8 @@ parser.add_argument('--adjoint', type=eval,
 
 
 args = parser.parse_args()
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+# device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+device = torch.device("cpu")
 
 if args.baseline:
     folder = './NODE'
