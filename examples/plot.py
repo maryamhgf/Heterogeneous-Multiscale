@@ -3,7 +3,7 @@ import pandas as pd
 import os
 import matplotlib.pyplot as plt
 
-inf_dir = "slow_step100_fast_step5_kernelexp_cutoff3000_nepoch400_fast_nepoch2_fast_step_length1_sensitivityautograd_solverdopri5"
+inf_dir = "slow_step50_fast_step4_kerneluniform_cutoff3000_nepoch400_fast_nepoch2_fast_step_length1_sensitivityautograd_solverdopri5_datasethopper_hopper-sample5"
 common = inf_dir + "/train_inf.csv"
 NODE_file = "./NODE/" + common
 NODE_HMM_file = "./NODE_HMM/" + common
@@ -28,6 +28,7 @@ if not os.path.exists(dirName):
 else:
     print("Directory ", dirName,  " already exists")
 
+plt.ylim([0, 0.1])
 plt.plot(data_NODE['loss'], label='NODE')
 plt.plot(data_NODE_HMM['loss'], label='NODE+HMM')
 plt.legend()

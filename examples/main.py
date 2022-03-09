@@ -1,3 +1,7 @@
+from parse_datasets import parse_datasets
+from collections import Counter
+from scipy import signal
+from mujoco_physics import HopperPhysics
 import argparse
 import matplotlib.pyplot as plt
 import torch
@@ -15,10 +19,6 @@ import time
 import pytorch_lightning as pl
 import sys
 sys.path.insert(0, '..')
-from mujoco_physics import HopperPhysics
-from scipy import signal
-from collections import Counter
-from parse_datasets import parse_datasets
 
 
 torch.manual_seed(0)
@@ -35,24 +35,31 @@ parser.add_argument('--sesitivity', type=str, default="autograd")
 parser.add_argument('--cutoff', type=int, default=3000)
 parser.add_argument('--test', type=eval, default=True, choices=[True, False])
 parser.add_argument('--freq', type=int, default=50)
-parser.add_argument('--dataset', type=str, default='hopper', choices=['hopper', 'multiscale'])
+parser.add_argument('--dataset', type=str, default='hopper',
+                    choices=['hopper', 'multiscale'])
 parser.add_argument('--fast_epochs', type=int, default=2)
 parser.add_argument('--fast_samples', type=int, default=4)
 parser.add_argument('--fast_length_of_intervals', type=int, default=1)
 parser.add_argument('--length_of_intervals', type=int, default=50)
 parser.add_argument('--kernel_method', type=str, default='uniform')
-parser.add_argument('-t', '--timepoints', type=int, default=500, help="Total number of time-points")
-parser.add_argument('--max-t',  type=float, default=5., help="We subsample points in the interval [0, args.max_tp]")
-parser.add_argument('--noise-weight', type=float, default=0, help="Noise amplitude for generated traejctories")
-parser.add_argument('--extrap', action='store_true', help="Set extrapolation mode. If this flag is not set, run interpolation mode.")
-parser.add_argument('-c', '--cut-tp', type=int, default=None, help="Cut out the section of the timeline of the specified length (in number of points).")
-parser.add_argument('-s', '--sample-tp', type=float, default=None, help="Number of time points to sub-sample.")
+parser.add_argument('-t', '--timepoints', type=int,
+                    default=500, help="Total number of time-points")
+parser.add_argument('--max-t',  type=float, default=5.,
+                    help="We subsample points in the interval [0, args.max_tp]")
+parser.add_argument('--noise-weight', type=float, default=0,
+                    help="Noise amplitude for generated traejctories")
+parser.add_argument('--extrap', action='store_true',
+                    help="Set extrapolation mode. If this flag is not set, run interpolation mode.")
+parser.add_argument('-c', '--cut-tp', type=int, default=None,
+                    help="Cut out the section of the timeline of the specified length (in number of points).")
+parser.add_argument('-s', '--sample-tp', type=float,
+                    default=None, help="Number of time points to sub-sample.")
 parser.add_argument('-n',  type=int, default=3000, help="Size of the dataset")
 parser.add_argument('-b', '--batch-size', type=int, default=1)
-parser.add_argument('-hopper_sample_num', '--hopper_sample_num', type=int, default=5)
+parser.add_argument('-hopper_sample_num',
+                    '--hopper_sample_num', type=int, default=5)
 parser.add_argument('--adjoint', type=eval,
                     default=False, choices=[True, False])
-
 
 
 args = parser.parse_args()
@@ -76,8 +83,10 @@ else:
     print("Directory ", folder,  " already exists")
 
 dirName = folder + "/slow_step" + str(args.length_of_intervals)+"_fast_step"+str(args.fast_samples)\
-    +"_kernel"+args.kernel_method+"_cutoff"+str(args.cutoff)+"_nepoch"+str(args.nepochs)+"_fast_nepoch"+str(args.fast_epochs)+"_fast_step_length"+str(args.fast_length_of_intervals)\
-        +"_sensitivity"+args.sesitivity+"_solver"+args.solver+"_dataset"+args.dataset+"_hopper-sample"+str(args.hopper_sample_num)
+    + "_kernel"+args.kernel_method+"_cutoff"+str(args.cutoff)+"_nepoch"+str(args.nepochs)\
+    + "_fast_nepoch"+str(args.fast_epochs)+"_fast_step_length"+str(args.fast_length_of_intervals)\
+    + "_sensitivity"+args.sesitivity+"_solver"+args.solver+"_dataset" + \
+    args.dataset+"_hopper-sample"+str(args.hopper_sample_num)
 
 if not os.path.exists(dirName):
     os.mkdir(dirName)
@@ -115,9 +124,11 @@ def store_data(loss, memory, time):
 
 
 def get_estimation(network, fast_series, slow_value, shape, t_eval_fast):
-    kernels = get_kernel((fast_series.shape[0], slow_value.shape[1]), method=args.kernel_method, t=t_eval_fast)
+    kernels = get_kernel(
+        (fast_series.shape[0], slow_value.shape[1]), method=args.kernel_method, t=t_eval_fast)
     slow_value_squeezes = torch.squeeze(slow_value, 0)
-    slow_value_spanned =slow_value_squeezes.repeat(len(fast_series)).reshape((shape[0],-1))
+    slow_value_spanned = slow_value_squeezes.repeat(
+        len(fast_series)).reshape((shape[0], -1))
     features = torch.cat([slow_value_spanned, fast_series], dim=1)
     # print(slow_value.shape[1])
     results = network(None, features.clone().detach())[:, :slow_value.shape[1]]
@@ -144,7 +155,8 @@ def get_fast_prediction(t_span, x0_fast_, x0_slow, fast_epochs, length_of_interv
             t_fast_eval = t_fast_eval + [t_fast_eval[-1] + fast_step]
         pred_fast = torch.cat(predicted_series[0: len(predicted_series) - 1])
     if args.solver == 'dopri5':
-        pred_fast = odeint(net_fast, features, t_span).squeeze(1)[:, dim_slow:]
+        pred_fast = odeint(net_fast, features, t_span,
+                           rtol=1e-5, atol=1e-5).squeeze(1)[:, dim_slow:]
         for _ in range(length_of_intervals):
             t_fast_eval = t_fast_eval + [t_fast_eval[-1] + fast_step]
     return pred_fast, t_fast_eval[0: len(t_fast_eval)-1]
@@ -156,6 +168,8 @@ def reverse_mode_derivetive(neural_net, parameters, t_start, t_end, final_state,
     def aug_dynamics(state, adjoint_param, t, parameters):
         return neural_net(neural_net(state), -adjoint_param.T * )
 '''
+
+
 def get_multi_freq_inf(dataset):
     is_multi_freq = False
     fs = []
@@ -179,27 +193,30 @@ def get_multi_freq_inf(dataset):
     #slow_dyn = slow_dyn[1:]
     fast_dyn = dataset[fast_dyn_indexes]
     if(len(count_freq.keys()) >= 2):
-       is_multi_freq = True
+        is_multi_freq = True
     return is_multi_freq, slow_dyn, fast_dyn
-    
+
+
 def get_high_error_dynamic(predictd, real):
     losses = []
     print(predictd.shape)
     for dynamic in range(len(predictd)):
-        loss = (1/predictd.shape[1]) * torch.sum((predictd[dynamic] - real[dynamic])**2)
+        loss = (1/predictd.shape[1]) * \
+            torch.sum((predictd[dynamic] - real[dynamic])**2)
         losses.append(loss)
     return losses.index(max(losses))
 
 # the dynamical system
+
 
 if args.dataset == 'multiscale':
     def multi_res_fun(t, x, ep):
         a = 1
         b = 2
         A = [0, a, 0, 0,
-            -a, 0, 0, 0,
-            0, 0, 0, b,
-            0, 0, -b, 0],
+             -a, 0, 0, 0,
+             0, 0, 0, b,
+             0, 0, -b, 0],
         A = np.array(A, dtype='float64')
         A = A.reshape(4, 4)
         fx = [0, x[1]**2/a, 0, 2*x[0]*x[1]/b]
@@ -282,7 +299,7 @@ elif(args.dataset == "hopper"):
     print(len(dataset))
     print(type(dataset))
     print(dataset.shape)
-    #(number of dataset (time series sample), time series, dynamics)
+    # (number of dataset (time series sample), time series, dynamics)
     samples_dataset = dataset[args.hopper_sample_num, :, :].T
     print(samples_dataset.shape)
     is_multi_freq, slow_dyn, fast_dyn = get_multi_freq_inf(samples_dataset)
@@ -293,7 +310,7 @@ elif(args.dataset == "hopper"):
     dim_slow = slow_dyn.shape[0]
     dim_fast = fast_dyn.shape[0]
 
-    
+
 if args.baseline == False:
     # define neural net
     class ODEfunc(nn.Module):
@@ -302,14 +319,15 @@ if args.baseline == False:
             super(ODEfunc, self).__init__()
             self.out_dim = out_dim
             self.mode = mode
-            self.linear_in = nn.Linear(dim_slow + dim_fast, 50, bias=False)
+            self.linear_in = nn.Linear(dim_slow + dim_fast, 200, bias=False)
             self.relu = nn.ReLU(inplace=False)
-            self.linear_out = nn.Linear(50, out_dim, bias=False)
+            self.linear_out = nn.Linear(200, out_dim, bias=False)
 
         def forward(self, t, x):
             # tt = torch.ones((1, 1)) * t
             # ttx = torch.cat([tt, x], 1)
-            slow, fast = x[:, :dim_slow].clone().detach(), x[:, dim_slow:].clone().detach()
+            slow, fast = x[:, :dim_slow].clone(
+            ).detach(), x[:, dim_slow:].clone().detach()
             out = self.linear_in(x)
             out = self.relu(out)
             out = self.linear_out(out)
@@ -320,7 +338,7 @@ if args.baseline == False:
 
     net_slow = ODEfunc(dim_slow, 'slow')
     net_fast = ODEfunc(dim_fast, 'fast')
-   
+
     # net_slow = nn.Sequential(
     #     #features: the init value and the x_fast_est
     #     nn.Linear(dim_slow + dim_fast, 50, bias = False),
@@ -345,8 +363,8 @@ if args.baseline == False:
         optim_fast, milestones=[60, 100], gamma=2)
     loss_fn_slow = nn.MSELoss()
     loss_fn_fast = nn.MSELoss()
-    #initial points of all modes:
-    #Two first modes are slow variables and two last modes are fast variables.
+    # initial points of all modes:
+    # Two first modes are slow variables and two last modes are fast variables.
     if(args.dataset == "multiscale"):
         x0_slow = X[[0, 1], 0]
         x0_fast = X[[2, 3], 0]
@@ -386,17 +404,18 @@ if args.baseline == False:
         start = time.time()
         for i in range(int(len(t_span)/args.length_of_intervals)):  # t_sapan_slow
             t_start = i*args.length_of_intervals
-            t_interval_fast = t_span[t_start: t_start+args.fast_samples * args.fast_length_of_intervals]
+            t_interval_fast = t_span[t_start: t_start +
+                                     args.fast_samples * args.fast_length_of_intervals]
             if(args.dataset == "multiscale"):
                 x0_fast = X[[2, 3], t_start]
                 x0_fast = torch.unsqueeze(x0_fast, 0)
             else:
                 x0_fast = fast_dyn[:, t_start]
-                x0_fast = torch.unsqueeze(x0_fast, 0)               
-            #for the fast series part
-            pred_fast, t_fast_eval = get_fast_prediction(t_interval_fast, x0_fast.clone().detach(), x0_slow.clone().detach(), \
-                args.fast_epochs, args.fast_samples, t_start, fast_step=args.fast_length_of_intervals)
-        
+                x0_fast = torch.unsqueeze(x0_fast, 0)
+            # for the fast series part
+            pred_fast, t_fast_eval = get_fast_prediction(t_interval_fast, x0_fast.clone().detach(), x0_slow.clone().detach(),
+                                                         args.fast_epochs, args.fast_samples, t_start, fast_step=args.fast_length_of_intervals)
+
             X_fast_eval = X_fast[:, t_fast_eval]
             loss_fast = loss_fn_slow(pred_fast.T, X_fast_eval)
             loss_fast.backward(retain_graph=True)
@@ -451,11 +470,13 @@ if args.baseline == False:
 
     plt.figure(figsize=(14, 7))
     plt.subplot(1, 2, 1)
+    plt.ylim([0, 0.5])
     plt.plot(losses_slow)
     plt.title("train loss")
     plt.xlabel("epoch")
     plt.ylabel("loss")
     plt.subplot(1, 2, 2)
+    plt.ylim([0, 0.002])
     plt.plot(losses_fast)
     plt.title("train loss")
     plt.xlabel("epoch")
@@ -482,6 +503,8 @@ else:
 
     # Neural ODE
     neural_ODE = NeuralODE(neural_net, sensitivity='adjoint', solver='tsit5',
+                           atol=1e-3, rtol=1e-3).to(device)
+    neural_ODE = NeuralODE(neural_net, solver='euler',
                            atol=1e-3, rtol=1e-3).to(device)
     optim = torch.optim.Adam(neural_ODE.parameters(), lr=0.01)
     scheduler = torch.optim.lr_scheduler.MultiStepLR(
@@ -569,4 +592,3 @@ else:
     print(dyn_max_error_inds)
 
 print(dim_slow, dim_fast)
-    
