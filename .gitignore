@@ -7,3 +7,6 @@
 build
 dist
 .DS_Store
+Comparison/
+NODE/
+NODE_HMM/

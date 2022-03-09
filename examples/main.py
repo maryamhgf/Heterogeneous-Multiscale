@@ -389,8 +389,8 @@ else:
         nn.Linear(50, dim_slow, bias=False))
 
     # Neural ODE
-    neural_ODE = NeuralODE(neural_net, sensitivity='adjoint', solver='tsit5',
-                           atol=1e-3, rtol=1e-3, rtol_adjoint=1e-3, atol_adjoint=1e-3).to(device)
+    neural_ODE = NeuralODE(neural_net, sensitivity='adjoint', solver='dopri5',
+                           atol=1e-3, rtol=1e-3, rtol_adjoint=1e-1, atol_adjoint=1e-1).to(device)
     optim = torch.optim.Adam(neural_ODE.parameters(), lr=0.01)
     scheduler = torch.optim.lr_scheduler.MultiStepLR(
         optim, milestones=[50, 100], gamma=2)
