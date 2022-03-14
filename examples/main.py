@@ -186,9 +186,9 @@ def get_multi_freq_inf(dataset):
     slow_dyn_indexes = [i for i, v in enumerate(fs) if v <= max_slow_freq]
     fast_dyn_indexes = [i for i, v in enumerate(fs) if v >= min_fast_freq]
     slow_dyn = dataset[slow_dyn_indexes]
-    slow_dyn = torch.cat([slow_dyn[0:6], slow_dyn[6+1:]], dim=0)
-    slow_dyn = torch.cat([slow_dyn[0:1], slow_dyn[1+1:]], dim=0)
-    slow_dyn = torch.cat([slow_dyn[0:3], slow_dyn[3+1:]], dim=0)
+    # slow_dyn = torch.cat([slow_dyn[0:6], slow_dyn[6+1:]], dim=0)
+    # slow_dyn = torch.cat([slow_dyn[0:1], slow_dyn[1+1:]], dim=0)
+    # slow_dyn = torch.cat([slow_dyn[0:3], slow_dyn[3+1:]], dim=0)
 
     #slow_dyn = slow_dyn[1:]
     fast_dyn = dataset[fast_dyn_indexes]
