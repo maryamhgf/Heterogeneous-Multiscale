@@ -19,7 +19,7 @@ class HopperPhysics(object):
 
 	training_file = 'training.pt'
 
-	def __init__(self, root, download = True, generate=False, device = torch.device("cpu")):
+	def __init__(self, root, download = False, generate= False, device = torch.device("cpu")):
 		self.root = root
 		if download:
 			self._download()
@@ -31,6 +31,7 @@ class HopperPhysics(object):
 			raise RuntimeError('Dataset not found.' + ' You can use download=True to download it')
 
 		data_file = os.path.join(self.data_folder, self.training_file)
+		print(data_file)
 
 		self.data = torch.Tensor(torch.load(data_file)).to(device)
 		print("---self.data", self.data.shape)

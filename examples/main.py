@@ -54,10 +54,10 @@ parser.add_argument('-c', '--cut-tp', type=int, default=None,
                     help="Cut out the section of the timeline of the specified length (in number of points).")
 parser.add_argument('-s', '--sample-tp', type=float,
                     default=None, help="Number of time points to sub-sample.")
-parser.add_argument('-n',  type=int, default=3000, help="Size of the dataset")
+parser.add_argument('-n',  type=int, default=10000, help="Size of the dataset")
 parser.add_argument('-b', '--batch-size', type=int, default=1)
 parser.add_argument('-hopper_sample_num',
-                    '--hopper_sample_num', type=int, default=5)
+                    '--hopper_sample_num', type=int, default=9999)
 parser.add_argument('--adjoint', type=eval,
                     default=False, choices=[True, False])
 
