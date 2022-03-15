@@ -17,7 +17,7 @@ class HopperPhysics(object):
 
 	n_training_samples = 10000
 
-	training_file = 'training.pt'
+	training_file = 'training_500.pt'
 
 	def __init__(self, root, download = False, generate= False, device = torch.device("cpu")):
 		self.root = root

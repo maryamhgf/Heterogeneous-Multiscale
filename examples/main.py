@@ -57,9 +57,10 @@ parser.add_argument('-s', '--sample-tp', type=float,
 parser.add_argument('-n',  type=int, default=10000, help="Size of the dataset")
 parser.add_argument('-b', '--batch-size', type=int, default=1)
 parser.add_argument('-hopper_sample_num',
-                    '--hopper_sample_num', type=int, default=9999)
+                    '--hopper_sample_num', type=int, default=13)
 parser.add_argument('--adjoint', type=eval,
                     default=False, choices=[True, False])
+parser.add_argument('--irregular', type=bool, default= 'False')
 
 
 args = parser.parse_args()
@@ -174,17 +175,19 @@ def get_multi_freq_inf(dataset):
     is_multi_freq = False
     fs = []
     fast_dyn = []
-    slow_dym = []
+    slow_dyn = []
     for i in range(len(dataset)):
         f, Pxx = signal.periodogram(dataset[i])
         indx_max = np.argmax(Pxx, axis=0)
         fs.append(f[indx_max])
     count_freq = Counter(fs)
     freqs = list(count_freq.keys())
+    freqs.sort()
     max_slow_freq = freqs[int(len(freqs)/2) - 1]
     min_fast_freq = freqs[int(len(freqs)/2)]
     slow_dyn_indexes = [i for i, v in enumerate(fs) if v <= max_slow_freq]
     fast_dyn_indexes = [i for i, v in enumerate(fs) if v >= min_fast_freq]
+    print(slow_dyn_indexes, fast_dyn_indexes)
     slow_dyn = dataset[slow_dyn_indexes]
     # slow_dyn = torch.cat([slow_dyn[0:6], slow_dyn[6+1:]], dim=0)
     # slow_dyn = torch.cat([slow_dyn[0:1], slow_dyn[1+1:]], dim=0)
@@ -199,7 +202,6 @@ def get_multi_freq_inf(dataset):
 
 def get_high_error_dynamic(predictd, real):
     losses = []
-    print(predictd.shape)
     for dynamic in range(len(predictd)):
         loss = (1/predictd.shape[1]) * \
             torch.sum((predictd[dynamic] - real[dynamic])**2)
@@ -358,9 +360,9 @@ if args.baseline == False:
     optim_fast = torch.optim.Adam(net_fast.parameters(), lr=0.01)
 
     scheduler_slow = torch.optim.lr_scheduler.MultiStepLR(
-        optim_slow, milestones=[60, 100], gamma=2)
+        optim_slow, milestones=[100, 500], gamma=0.5)
     scheduler_fast = torch.optim.lr_scheduler.MultiStepLR(
-        optim_fast, milestones=[60, 100], gamma=2)
+        optim_fast, milestones=[100, 500], gamma=0.5)
     loss_fn_slow = nn.MSELoss()
     loss_fn_fast = nn.MSELoss()
     # initial points of all modes:
@@ -400,7 +402,6 @@ if args.baseline == False:
         t_slow_eval = [0]
         optim_slow.zero_grad()
         optim_fast.zero_grad()
-        print("-----------iters: ", iter)
         start = time.time()
         for i in range(int(len(t_span)/args.length_of_intervals)):  # t_sapan_slow
             t_start = i*args.length_of_intervals
@@ -420,7 +421,7 @@ if args.baseline == False:
             loss_fast = loss_fn_slow(pred_fast.T, X_fast_eval)
             loss_fast.backward(retain_graph=True)
             optim_fast.step()
-            scheduler_fast.step()
+            # scheduler_fast.step()
             # print(
             # str(i) + "th point: loss fast, iter["+str(iter)+"]", float(loss_fast))
             estimation = get_estimation(net_slow, pred_fast.clone().detach(
@@ -438,14 +439,16 @@ if args.baseline == False:
         max_error_indexs.append(max_indx)
         loss_slow.backward(retain_graph=True)
         optim_slow.step()
-        scheduler_slow.step()
+        # scheduler_slow.step()
         time_iter = time.time() - start
         current, peak = tracemalloc.get_traced_memory()
         memory.append(current / 10**6)
         losses_slow.append(loss_slow.item())
         losses_fast.append(loss_fast.item())
         times.append(time_iter)
-        print("loss slow, iter["+str(iter)+"]", float(loss_slow))
+        if (iter % 10 == 0 and iter != 0) or (iter == args.nepochs - 1):
+            print("-----------iters: ", iter)
+            print("loss slow, iter["+str(iter)+"]", float(loss_slow))
         if (args.test == True) and ((iter % args.freq == 0 and iter != 0) or iter == args.nepochs - 1):
             with torch.no_grad():
                 t_plot = t_slow_eval
