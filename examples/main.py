@@ -60,7 +60,7 @@ parser.add_argument('-hopper_sample_num',
                     '--hopper_sample_num', type=int, default=13)
 parser.add_argument('--adjoint', type=eval,
                     default=False, choices=[True, False])
-parser.add_argument('--irregular', type=bool, default= 'False')
+parser.add_argument('--irregular', type=eval, default= 'False')
 
 
 args = parser.parse_args()
@@ -139,7 +139,6 @@ def get_estimation(network, fast_series, slow_value, shape, t_eval_fast):
 
 
 def get_fast_prediction(t_span, x0_fast_, x0_slow, fast_epochs, length_of_intervals, t_start, fast_step=1):
-    # print(x0_fast_.shape, x0_slow.shape)
     dim_slow, dim_fast = x0_slow.shape[1], x0_fast_.shape[1]
     dt = t_span[fast_step] - t_span[0]
     x0_fast = x0_fast_
@@ -148,7 +147,8 @@ def get_fast_prediction(t_span, x0_fast_, x0_slow, fast_epochs, length_of_interv
     features = torch.concat((x0_slow, x0_fast), dim=1)
     if args.solver == 'euler':
         # print(x0_fast.clone().detach().shape, net_fast(None, features)[:, dim_slow:].shape)
-        for _ in range(length_of_intervals - 1):
+        for i in range(length_of_intervals - 1):
+            dt = t_span[i + 1] - t_span[i]
             x0_fast = x0_fast.clone().detach() + dt * \
                 net_fast(None, features)[:, dim_slow:]
             predicted_series = predicted_series + [x0_fast]
@@ -183,11 +183,11 @@ def get_multi_freq_inf(dataset):
     count_freq = Counter(fs)
     freqs = list(count_freq.keys())
     freqs.sort()
+    print(freqs)
     max_slow_freq = freqs[int(len(freqs)/2) - 1]
     min_fast_freq = freqs[int(len(freqs)/2)]
     slow_dyn_indexes = [i for i, v in enumerate(fs) if v <= max_slow_freq]
     fast_dyn_indexes = [i for i, v in enumerate(fs) if v >= min_fast_freq]
-    print(slow_dyn_indexes, fast_dyn_indexes)
     slow_dyn = dataset[slow_dyn_indexes]
     # slow_dyn = torch.cat([slow_dyn[0:6], slow_dyn[6+1:]], dim=0)
     # slow_dyn = torch.cat([slow_dyn[0:1], slow_dyn[1+1:]], dim=0)
@@ -298,15 +298,18 @@ elif(args.dataset == "hopper"):
     data_obj, t_span = parse_datasets(args, device)
     dataset = data_obj["dataset_obj"].get_dataset()[:args.n]
     dataset = dataset.to(device)
-    print(len(dataset))
-    print(type(dataset))
     print(dataset.shape)
-    # (number of dataset (time series sample), time series, dynamics)
+    # (number of samples, number of time steps, dynamics)
     samples_dataset = dataset[args.hopper_sample_num, :, :].T
-    print(samples_dataset.shape)
+    if args.irregular:
+        print('!!')
+        percentage = 0.7
+        indices = torch.randperm(t_span.shape[0])[:int(percentage * t_span.shape[0])]
+        sorted_idx, _ = torch.sort(indices)
+        t_span = t_span[sorted_idx]
+        samples_dataset = samples_dataset[:, sorted_idx]
+    print(samples_dataset.shape, t_span.shape)
     is_multi_freq, slow_dyn, fast_dyn = get_multi_freq_inf(samples_dataset)
-    print('!!!!', slow_dyn.shape, fast_dyn.shape)
-    print(is_multi_freq)
     print("slow: ", slow_dyn.shape)
     print("fast:", fast_dyn.shape)
     dim_slow = slow_dyn.shape[0]
@@ -326,8 +329,7 @@ if args.baseline == False:
             self.linear_out = nn.Linear(200, out_dim, bias=False)
 
         def forward(self, t, x):
-            # tt = torch.ones((1, 1)) * t
-            # ttx = torch.cat([tt, x], 1)
+            # t is not used, it's to maintain compatible with torchdiffeq package
             slow, fast = x[:, :dim_slow].clone(
             ).detach(), x[:, dim_slow:].clone().detach()
             out = self.linear_in(x)
@@ -381,7 +383,6 @@ if args.baseline == False:
         x0_fast = torch.unsqueeze(x0_fast, 0)
         x0_slow = torch.unsqueeze(x0_slow, 0)
 
-    dt = t_span[args.length_of_intervals] - t_span[0]
     losses_slow, losses_fast = [], []
     times = []
     memory = []
@@ -403,10 +404,12 @@ if args.baseline == False:
         optim_slow.zero_grad()
         optim_fast.zero_grad()
         start = time.time()
-        for i in range(int(len(t_span)/args.length_of_intervals)):  # t_sapan_slow
-            t_start = i*args.length_of_intervals
-            t_interval_fast = t_span[t_start: t_start +
-                                     args.fast_samples * args.fast_length_of_intervals]
+        # for i in range(int(len(t_span)/args.length_of_intervals)):  # t_sapan_slow
+        for i in range(args.length_of_intervals, len(t_span), args.length_of_intervals):
+            t_start = i - args.length_of_intervals
+            dt = t_span[i] - t_span[t_start]
+            # by default, args.fast_length_of_intervals = 1, args.fast_samples = 4
+            t_interval_fast = t_span[t_start: i]
             if(args.dataset == "multiscale"):
                 x0_fast = X[[2, 3], t_start]
                 x0_fast = torch.unsqueeze(x0_fast, 0)
@@ -416,12 +419,11 @@ if args.baseline == False:
             # for the fast series part
             pred_fast, t_fast_eval = get_fast_prediction(t_interval_fast, x0_fast.clone().detach(), x0_slow.clone().detach(),
                                                          args.fast_epochs, args.fast_samples, t_start, fast_step=args.fast_length_of_intervals)
-
             X_fast_eval = X_fast[:, t_fast_eval]
             loss_fast = loss_fn_slow(pred_fast.T, X_fast_eval)
             loss_fast.backward(retain_graph=True)
             optim_fast.step()
-            # scheduler_fast.step()
+            scheduler_fast.step()
             # print(
             # str(i) + "th point: loss fast, iter["+str(iter)+"]", float(loss_fast))
             estimation = get_estimation(net_slow, pred_fast.clone().detach(
@@ -429,7 +431,7 @@ if args.baseline == False:
             predicted_slow = x0_slow.clone().detach() + dt*estimation
             x0_slow = predicted_slow
             predicted_slow_series = predicted_slow_series + [predicted_slow]
-            t_slow_eval = t_slow_eval + [(i + 1)*args.length_of_intervals - 1]
+            t_slow_eval.append(i)
 
         pred_slow = torch.cat(
             predicted_slow_series[0:len(predicted_slow_series)])
@@ -439,14 +441,14 @@ if args.baseline == False:
         max_error_indexs.append(max_indx)
         loss_slow.backward(retain_graph=True)
         optim_slow.step()
-        # scheduler_slow.step()
+        scheduler_slow.step()
         time_iter = time.time() - start
         current, peak = tracemalloc.get_traced_memory()
         memory.append(current / 10**6)
         losses_slow.append(loss_slow.item())
         losses_fast.append(loss_fast.item())
         times.append(time_iter)
-        if (iter % 10 == 0 and iter != 0) or (iter == args.nepochs - 1):
+        if (iter % 50 == 0 and iter != 0) or (iter == args.nepochs - 1):
             print("-----------iters: ", iter)
             print("loss slow, iter["+str(iter)+"]", float(loss_slow))
         if (args.test == True) and ((iter % args.freq == 0 and iter != 0) or iter == args.nepochs - 1):
@@ -494,7 +496,6 @@ if args.baseline == False:
         torch.save(prediction1, dirName+"/prediction1_data")
 
     dyn_max_error_inds = Counter(max_error_indexs)
-    print(dyn_max_error_inds)
 
 else:
     print("base NODE")
